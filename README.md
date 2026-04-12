@@ -31,21 +31,32 @@ make install-dev
 pip install git+https://github.com/jewzaam/agentpulse.git
 ```
 
+## Hook Setup
+
+AgentPulse receives events from Claude Code via command hooks:
+
+```bash
+make install-hooks    # Copy relay script to ~/.claude/agentpulse/scripts/
+```
+
+Then merge `hooks-settings.json` into your `~/.claude/settings.json`. This wires all
+Claude Code hook events to the relay, which POSTs them to AgentPulse.
+
 ## Usage
 
 ```bash
-python -m agentpulse
+python -m agentpulse --config ~/.claude/agentpulse/config.json
 ```
 
-The service starts on `127.0.0.1:17385` by default. Configure via environment variables:
+All configuration is via the config file (`--config` is required). See `config.example.json` for the schema:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AGENTPULSE_HOST` | Bind address | `127.0.0.1` |
-| `AGENTPULSE_PORT` | Bind port | `17385` |
-| `AGENTPULSE_DB_PATH` | SQLite database path | `~/.claude/agentpulse/agentpulse.db` |
-| `AGENTPULSE_DISCOVERY_INTERVAL` | Session scan interval (seconds) | `5` |
-| `DEBUG` | Enable debug logging | `false` |
+| Key | Description | Default |
+|-----|-------------|---------|
+| `host` | Bind address | `127.0.0.1` |
+| `port` | Bind port | `17385` |
+| `db_path` | SQLite database path | `~/.claude/agentpulse/agentpulse.db` |
+| `discovery_interval_seconds` | Session scan interval | `5` |
+| `debug` | Enable debug logging | `false` |
 
 ### API Endpoints
 

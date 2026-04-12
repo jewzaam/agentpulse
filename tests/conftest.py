@@ -74,12 +74,16 @@ def _block_http(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point DB path at tmp_path so tests get an isolated database."""
+def _isolate_config(tmp_path: Path) -> None:
+    """Create an isolated config file pointing DB at tmp_path."""
+    import json
+
     import agentpulse.config as config
 
     config.reset_settings()
-    monkeypatch.setattr(config, "DEFAULT_DB_PATH", tmp_path / "test.db")
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"db_path": str(tmp_path / "test.db")}))
+    config.set_config_path(config_path=config_file)
 
 
 def run_async(coro: Coroutine[Any, Any, Any]) -> Any:

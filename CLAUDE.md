@@ -5,21 +5,36 @@ Backend service that collects Claude Code agent state and exposes it via REST + 
 ## Commands
 
 ```bash
-make check          # Run format, lint, typecheck, test, coverage (default)
+make check          # Run format-check, lint, typecheck, test, coverage (default)
 make test           # Run pytest
 make coverage       # Run pytest with 80% coverage threshold
 make lint           # Lint with flake8
 make typecheck      # Type check with mypy
 make format         # Format with black
-make run            # Start the service (DEBUG=1 for debug logging)
+make run            # Start the service (set debug in config.json)
+make install-hooks  # Install hook relay to ~/.claude/agentpulse/scripts/
+make pipx           # Install globally via pipx
 ```
+
+## Hook Setup
+
+AgentPulse receives events from Claude Code via command hooks. The relay script
+(`scripts/hook_relay.py`) reads JSON from stdin and POSTs to `localhost:17385/hooks/claude`.
+It injects `source_system` (hostname) into the payload automatically.
+
+1. `make install-hooks` — copies relay script to `~/.claude/agentpulse/scripts/`
+2. Merge `hooks-settings.json` into `~/.claude/settings.json` — wires all 11 hook
+   events to the relay. If you already have hooks (e.g., claude-dashboard), add the
+   agentpulse relay as an additional entry in each event's hooks list.
+
+The relay is zero-dependency (stdlib only) and non-blocking (2s timeout, silent on failure).
 
 ## Architecture
 
 ```
 src/agentpulse/
 ├── app.py                        # FastAPI factory + lifespan (discovery loop)
-├── config.py                     # Settings from env vars (AGENTPULSE_* prefix)
+├── config.py                     # Settings from config file + env var overrides
 ├── db.py                         # SQLite singleton (aiosqlite, WAL mode)
 ├── models.py                     # Normalized Pydantic response models
 ├── websocket.py                  # ConnectionManager + /ws endpoint
