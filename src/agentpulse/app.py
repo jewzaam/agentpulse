@@ -21,8 +21,25 @@ from agentpulse.websocket import router as ws_router
 logger = logging.getLogger(__name__)
 
 
+class _SuppressConnectionReset(logging.Filter):
+    """Filter out ConnectionResetError from asyncio's ProactorEventLoop.
+
+    Hook relay clients disconnect before reading the full response,
+    which triggers a harmless ConnectionResetError on Windows.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and record.exc_info[1]:
+            if isinstance(record.exc_info[1], ConnectionResetError):
+                return False
+        return "ConnectionResetError" not in record.getMessage()
+
+
+logging.getLogger("asyncio").addFilter(_SuppressConnectionReset())
+
+
 async def _discovery_loop(
-    db: "aiosqlite.Connection",
+    db: aiosqlite.Connection,
     *,
     interval: int,
 ) -> None:
@@ -39,18 +56,30 @@ async def _discovery_loop(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup and shutdown."""
     settings = get_settings()
+    logger.info(
+        "starting host=%s port=%d db=%s log_level=%s discovery_interval=%ds",
+        settings.host,
+        settings.port,
+        settings.db_path,
+        settings.log_level,
+        settings.discovery_interval_seconds,
+    )
     db = await init_db(db_path=settings.db_path)
 
     discovery_task = asyncio.create_task(
         _discovery_loop(db, interval=settings.discovery_interval_seconds)
     )
+    logger.info(
+        "discovery loop started interval=%ds", settings.discovery_interval_seconds
+    )
 
     yield
 
+    logger.info("shutting down")
     discovery_task.cancel()
     try:
-        await discovery_task
-    except asyncio.CancelledError:
+        await asyncio.wait_for(asyncio.shield(discovery_task), timeout=3.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
     await close_db()
 

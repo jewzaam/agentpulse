@@ -18,6 +18,8 @@ SESSIONS_DIR = CLAUDE_HOME / "sessions"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17385
 DEFAULT_DB_PATH = CLAUDE_HOME / "agentpulse" / "agentpulse.db"
+DEFAULT_LOG_FILE = CLAUDE_HOME / "agentpulse" / "agentpulse.log"
+DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_DISCOVERY_INTERVAL_SECONDS = 5
 
 
@@ -28,8 +30,9 @@ class Settings:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     db_path: Path = field(default_factory=lambda: DEFAULT_DB_PATH)
+    log_file: Path = field(default_factory=lambda: DEFAULT_LOG_FILE)
+    log_level: str = DEFAULT_LOG_LEVEL
     discovery_interval_seconds: int = DEFAULT_DISCOVERY_INTERVAL_SECONDS
-    debug: bool = False
 
     @classmethod
     def from_config(cls, *, config_path: Path) -> "Settings":
@@ -46,17 +49,23 @@ class Settings:
         db_path_str = data.get("db_path")
         db_path = Path(db_path_str) if db_path_str else DEFAULT_DB_PATH
 
+        log_file_str = data.get("log_file")
+        log_file = Path(log_file_str) if log_file_str else DEFAULT_LOG_FILE
+
+        log_level = data.get("log_level", DEFAULT_LOG_LEVEL)
+
         return cls(
             host=data.get("host", DEFAULT_HOST),
             port=int(data.get("port", DEFAULT_PORT)),
             db_path=db_path,
+            log_file=log_file,
+            log_level=str(log_level).upper(),
             discovery_interval_seconds=int(
                 data.get(
                     "discovery_interval_seconds",
                     DEFAULT_DISCOVERY_INTERVAL_SECONDS,
                 )
             ),
-            debug=str(data.get("debug", "")).lower() in ("1", "true", "yes"),
         )
 
 

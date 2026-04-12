@@ -2,7 +2,30 @@
 """Entry point for python -m agentpulse."""
 
 import argparse
+import logging
+import logging.handlers
 from pathlib import Path
+
+
+def _configure_logging(*, log_file: Path, log_level: str) -> None:
+    """Set up root logger with rotating file handler."""
+    level = getattr(logging, log_level, logging.INFO)
+
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    handler.setLevel(level)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.addHandler(handler)
 
 
 def main() -> None:
@@ -22,12 +45,15 @@ def main() -> None:
 
     set_config_path(config_path=args.config)
     settings = get_settings()
+
+    _configure_logging(log_file=settings.log_file, log_level=settings.log_level)
+
     uvicorn.run(
         "agentpulse.app:create_app",
         factory=True,
         host=settings.host,
         port=settings.port,
-        log_level="debug" if settings.debug else "info",
+        log_level=settings.log_level.lower(),
     )
 
 

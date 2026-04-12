@@ -55,8 +55,9 @@ All configuration is via the config file (`--config` is required). See `config.e
 | `host` | Bind address | `127.0.0.1` |
 | `port` | Bind port | `17385` |
 | `db_path` | SQLite database path | `~/.claude/agentpulse/agentpulse.db` |
+| `log_file` | Rotating log file path | `~/.claude/agentpulse/agentpulse.log` |
+| `log_level` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
 | `discovery_interval_seconds` | Session scan interval | `5` |
-| `debug` | Enable debug logging | `false` |
 
 ### API Endpoints
 
