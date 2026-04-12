@@ -98,6 +98,7 @@ async def run_discovery_tick(
     Returns list of newly discovered sessions (for WebSocket broadcast).
     """
     discovered = await asyncio.to_thread(discover_sessions, sessions_dir=sessions_dir)
+    logger.debug("discovery tick found %d session files", len(discovered))
 
     new_sessions: list[dict] = []
     seen_ids: set[str] = set()
@@ -124,6 +125,12 @@ async def run_discovery_tick(
         )
 
         if existing is None:
+            logger.info(
+                "new session discovered session=%s pid=%d cwd=%s",
+                sid,
+                session["pid"],
+                session["cwd"],
+            )
             new_sessions.append(session)
             await manager.broadcast(
                 {
@@ -147,6 +154,11 @@ async def run_discovery_tick(
 
         pid_alive = await asyncio.to_thread(validate_pid, pid=row["pid"])
         if not pid_alive:
+            logger.info(
+                "session pid died session=%s pid=%d",
+                sid,
+                row["pid"],
+            )
             await schema.update_session_pid_alive(db, session_id=sid, pid_alive=False)
             ended_at = time.time()
             await schema.end_session(db, session_id=sid, ended_at=ended_at)

@@ -35,8 +35,20 @@ async def _handle_agent_event(
     if not payload.agent_id:
         return
     if event == "SubagentStop":
+        logger.info(
+            "agent ended session=%s agent=%s",
+            payload.session_id,
+            payload.agent_id,
+        )
         await schema.end_agent(db, agent_id=payload.agent_id, ended_at=received_at)
     else:
+        logger.debug(
+            "agent event session=%s agent=%s type=%s event=%s",
+            payload.session_id,
+            payload.agent_id,
+            payload.agent_type,
+            event,
+        )
         await schema.upsert_agent(
             db,
             agent_id=payload.agent_id,
@@ -78,6 +90,14 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
     event = payload.hook_event_name
     raw = json.dumps(payload.model_dump())
 
+    logger.debug(
+        "hook received session=%s event=%s tool=%s agent=%s",
+        payload.session_id,
+        event,
+        payload.tool_name,
+        payload.agent_id or "-",
+    )
+
     await schema.upsert_session(
         db,
         session_id=payload.session_id,
@@ -91,6 +111,7 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
     await _handle_agent_event(db, payload, event=event, received_at=received_at)
 
     if event == "SessionEnd":
+        logger.info("session ended session=%s", payload.session_id)
         await schema.end_session(
             db, session_id=payload.session_id, ended_at=received_at
         )

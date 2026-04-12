@@ -76,3 +76,5 @@ src/agentpulse/
   from `~/.claude/sessions/`. Tests mock `validate_pid` to avoid psutil hitting real PIDs.
 - The `src/` layout means Makefile targets use `SRC_DIR = src/$(PACKAGE_NAME)` for format,
   lint, typecheck — not the bare package name.
+- Windows `ProactorEventLoop` raises `ConnectionResetError` when hook relay clients
+  disconnect early. Suppressed by a logging filter in `app.py` on the `asyncio` logger.

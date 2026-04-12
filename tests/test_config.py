@@ -9,6 +9,7 @@ import pytest
 from agentpulse.config import (
     DEFAULT_DISCOVERY_INTERVAL_SECONDS,
     DEFAULT_HOST,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_PORT,
     Settings,
     get_settings,
@@ -22,10 +23,10 @@ class TestSettings:
         settings = Settings.from_config(config_path=Path("/nonexistent"))
         assert settings.host == DEFAULT_HOST
         assert settings.port == DEFAULT_PORT
+        assert settings.log_level == DEFAULT_LOG_LEVEL
         assert settings.discovery_interval_seconds == (
             DEFAULT_DISCOVERY_INTERVAL_SECONDS
         )
-        assert settings.debug is False
 
     def test_from_config_file(self, tmp_path: Path) -> None:
         config = tmp_path / "config.json"
@@ -34,11 +35,17 @@ class TestSettings:
         assert settings.host == "0.0.0.0"
         assert settings.port == 9000
 
-    def test_debug_from_file(self, tmp_path: Path) -> None:
+    def test_log_level_from_file(self, tmp_path: Path) -> None:
         config = tmp_path / "config.json"
-        config.write_text(json.dumps({"debug": True}))
+        config.write_text(json.dumps({"log_level": "debug"}))
         settings = Settings.from_config(config_path=config)
-        assert settings.debug is True
+        assert settings.log_level == "DEBUG"
+
+    def test_log_file_from_config(self, tmp_path: Path) -> None:
+        config = tmp_path / "config.json"
+        config.write_text(json.dumps({"log_file": "/tmp/custom.log"}))
+        settings = Settings.from_config(config_path=config)
+        assert settings.log_file == Path("/tmp/custom.log")
 
     def test_db_path_from_file(self, tmp_path: Path) -> None:
         config = tmp_path / "config.json"
