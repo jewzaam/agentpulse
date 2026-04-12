@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 17385,
+  "db_path": "~/.claude/agentpulse/agentpulse.db",
+  "discovery_interval_seconds": 5,
+  "debug": false
+}

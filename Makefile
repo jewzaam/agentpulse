@@ -15,6 +15,7 @@ endif
 
 -include make/run.mk
 -include make/pipx.mk
+-include make/hooks.mk
 
 $(info venv: $(VENV_DIR))
 
