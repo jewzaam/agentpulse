@@ -20,6 +20,13 @@ class SessionResponse(BaseModel):
     ended_at: float | None = None
     branch: str = ""
     source_system: str = ""
+    cost_usd: float | None = None
+    context_used_pct: float | None = None
+    model_name: str | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    lines_added: int | None = None
+    lines_removed: int | None = None
     agent_count: int = 0
     derived_state: str | None = None
 
@@ -55,6 +62,13 @@ class SessionDetailResponse(BaseModel):
     ended_at: float | None = None
     branch: str = ""
     source_system: str = ""
+    cost_usd: float | None = None
+    context_used_pct: float | None = None
+    model_name: str | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    lines_added: int | None = None
+    lines_removed: int | None = None
     agent_count: int = 0
     derived_state: str | None = None
     agents: list[AgentResponse] = []

@@ -35,8 +35,11 @@ class ConnectionManager:
 
     async def broadcast(self, message: dict) -> None:
         """Send a JSON message to all connected clients."""
+        if not self._connections:
+            return
         dead: list[WebSocket] = []
         payload = json.dumps(message)
+        msg_type = message.get("type", "?")
 
         for ws in self._connections:
             try:
@@ -46,6 +49,10 @@ class ConnectionManager:
 
         for ws in dead:
             self.disconnect(ws)
+
+        sent = len(self._connections)
+        if sent > 0:
+            logger.debug("broadcast type=%s to %d clients", msg_type, sent)
 
 
 manager = ConnectionManager()

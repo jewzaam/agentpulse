@@ -132,6 +132,97 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
     return {"status": "ok"}
 
 
+@router.post("/statusline/claude")
+async def receive_statusline(body: dict) -> dict:
+    """Receive statusline data from Claude Code.
+
+    Stores the full payload with extracted numerics and enriches
+    the session with cost/context/model/token data.
+    """
+    db = await get_db()
+    received_at = time.time()
+    raw = json.dumps(body)
+
+    session_id = body.get("session_id", "")
+    if not session_id:
+        return {"status": "ignored", "reason": "no session_id"}
+
+    cost = body.get("cost", {})
+    ctx = body.get("context_window", {})
+    current_usage = ctx.get("current_usage", {})
+    model = body.get("model", {})
+
+    cost_usd = cost.get("total_cost_usd")
+    total_input_tokens = ctx.get("total_input_tokens")
+    total_output_tokens = ctx.get("total_output_tokens")
+    context_used_pct = ctx.get("used_percentage")
+    context_window_size = ctx.get("context_window_size")
+    cache_read_tokens = current_usage.get("cache_read_input_tokens")
+    cache_creation_tokens = current_usage.get("cache_creation_input_tokens")
+    duration_ms = cost.get("total_duration_ms")
+    api_duration_ms = cost.get("total_api_duration_ms")
+    lines_added = cost.get("total_lines_added")
+    lines_removed = cost.get("total_lines_removed")
+    model_name = model.get("display_name")
+
+    await schema.insert_statusline(
+        db,
+        session_id=session_id,
+        received_at=received_at,
+        cost_usd=cost_usd,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        context_used_pct=context_used_pct,
+        context_window_size=context_window_size,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        duration_ms=duration_ms,
+        api_duration_ms=api_duration_ms,
+        lines_added=lines_added,
+        lines_removed=lines_removed,
+        model_name=model_name,
+        raw_payload=raw,
+    )
+
+    await schema.update_session_statusline(
+        db,
+        session_id=session_id,
+        cost_usd=cost_usd,
+        context_used_pct=context_used_pct,
+        model_name=model_name,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        lines_added=lines_added,
+        lines_removed=lines_removed,
+    )
+
+    logger.debug(
+        "statusline received session=%s cost=%.2f ctx=%s%% model=%s",
+        session_id,
+        cost_usd or 0,
+        context_used_pct or "?",
+        model_name or "?",
+    )
+
+    await manager.broadcast(
+        {
+            "type": "statusline_update",
+            "platform": "claude",
+            "session_id": session_id,
+            "cost_usd": cost_usd,
+            "context_used_pct": context_used_pct,
+            "model_name": model_name,
+            "total_input_tokens": total_input_tokens,
+            "total_output_tokens": total_output_tokens,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            "timestamp": received_at,
+        }
+    )
+
+    return {"status": "ok"}
+
+
 @router.post("/costs/claude")
 async def receive_costs() -> Response:
     """Stub for future cost data ingestion."""
