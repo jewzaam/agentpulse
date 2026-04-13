@@ -147,10 +147,10 @@ async def receive_statusline(body: dict) -> dict:
     if not session_id:
         return {"status": "ignored", "reason": "no session_id"}
 
-    cost = body.get("cost", {})
-    ctx = body.get("context_window", {})
-    current_usage = ctx.get("current_usage", {})
-    model = body.get("model", {})
+    cost = body.get("cost") or {}
+    ctx = body.get("context_window") or {}
+    current_usage = ctx.get("current_usage") or {}
+    model = body.get("model") or {}
 
     cost_usd = cost.get("total_cost_usd")
     total_input_tokens = ctx.get("total_input_tokens")
