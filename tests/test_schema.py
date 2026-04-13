@@ -118,20 +118,48 @@ class TestSessionCrud:
         assert len(rows) == 1
         assert rows[0]["session_id"] == "alive"
 
-    async def test_update_session_discovery(self, db) -> None:
-        await schema.update_session_discovery(
-            db,
-            session_id="s1",
-            pid=5678,
-            cwd="/project",
-            entrypoint="vscode",
-            started_at=2000,
-            pid_alive=True,
-            branch="feature/foo",
+    async def test_upsert_preserves_started_at(self, db) -> None:
+        """started_at is set on INSERT and not overwritten on UPDATE."""
+        await schema.upsert_session(
+            db, session_id="s1", pid=1, cwd="/tmp", started_at=1000
+        )
+        await schema.upsert_session(
+            db, session_id="s1", started_at=2000, last_event="Stop"
         )
         row = await schema.get_session(db, session_id="s1")
-        assert row["pid"] == 5678
-        assert row["branch"] == "feature/foo"
+        assert row["started_at"] == 1000
+
+    async def test_upsert_sets_started_at_when_zero(self, db) -> None:
+        """started_at is updated if the current value is 0 (unknown)."""
+        await schema.upsert_session(
+            db, session_id="s1", pid=1, cwd="/tmp", started_at=0
+        )
+        await schema.upsert_session(
+            db, session_id="s1", started_at=5000, last_event="Stop"
+        )
+        row = await schema.get_session(db, session_id="s1")
+        assert row["started_at"] == 5000
+
+    async def test_upsert_updates_entrypoint_from_default(self, db) -> None:
+        """entrypoint is updated if the incoming value is not 'cli'."""
+        await schema.upsert_session(
+            db, session_id="s1", pid=1, cwd="/tmp", entrypoint="cli"
+        )
+        await schema.upsert_session(
+            db, session_id="s1", entrypoint="vscode", last_event="Stop"
+        )
+        row = await schema.get_session(db, session_id="s1")
+        assert row["entrypoint"] == "vscode"
+
+    async def test_upsert_preserves_entrypoint(self, db) -> None:
+        """entrypoint is not downgraded back to 'cli' once set."""
+        await schema.upsert_session(
+            db, session_id="s1", pid=1, cwd="/tmp", entrypoint="vscode"
+        )
+        await schema.upsert_session(
+            db, session_id="s1", entrypoint="cli", last_event="Stop"
+        )
+        row = await schema.get_session(db, session_id="s1")
         assert row["entrypoint"] == "vscode"
 
     async def test_clear_session(self, db) -> None:
@@ -160,6 +188,30 @@ class TestSessionCrud:
 
         agents = await schema.get_session_agents(db, session_id="s1")
         assert agents[0]["ended_at"] == 99.0
+
+    async def test_upsert_revives_ended_session(self, db) -> None:
+        """Hook events (upsert_session) must revive sessions that were
+        incorrectly marked as ended — if a hook fires, the session is alive."""
+        await schema.upsert_session(db, session_id="s1", pid=0, cwd="/tmp/proj")
+        # Simulate discovery killing the session
+        await schema.update_session_pid_alive(db, session_id="s1", pid_alive=False)
+        await schema.end_session(db, session_id="s1", ended_at=99.0)
+
+        row = await schema.get_session(db, session_id="s1")
+        assert row["pid_alive"] == 0
+        assert row["ended_at"] == 99.0
+
+        # Next hook event should revive the session
+        await schema.upsert_session(
+            db,
+            session_id="s1",
+            last_event="PreToolUse",
+            last_tool="Bash",
+            last_event_at=100.0,
+        )
+        row = await schema.get_session(db, session_id="s1")
+        assert row["pid_alive"] == 1
+        assert row["ended_at"] is None
 
     async def test_source_system(self, db) -> None:
         await schema.upsert_session(

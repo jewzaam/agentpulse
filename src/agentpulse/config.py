@@ -13,7 +13,6 @@ IS_LINUX = platform.system() == "Linux"
 SUBPROCESS_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 CLAUDE_HOME = Path.home() / ".claude"
-SESSIONS_DIR = CLAUDE_HOME / "sessions"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17385
