@@ -21,7 +21,14 @@ CREATE TABLE IF NOT EXISTS claude_sessions (
     ended_at REAL,
     pid_alive INTEGER NOT NULL DEFAULT 1,
     branch TEXT NOT NULL DEFAULT '',
-    source_system TEXT NOT NULL DEFAULT ''
+    source_system TEXT NOT NULL DEFAULT '',
+    cost_usd REAL,
+    context_used_pct REAL,
+    model_name TEXT,
+    total_input_tokens INTEGER,
+    total_output_tokens INTEGER,
+    lines_added INTEGER,
+    lines_removed INTEGER
 )
 """
 
@@ -77,6 +84,37 @@ CREATE INDEX IF NOT EXISTS idx_claude_limits_fetched
 ON claude_limits(fetched_at)
 """
 
+_CREATE_STATUSLINE = """
+CREATE TABLE IF NOT EXISTS claude_statusline (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    received_at REAL NOT NULL,
+    cost_usd REAL,
+    total_input_tokens INTEGER,
+    total_output_tokens INTEGER,
+    context_used_pct REAL,
+    context_window_size INTEGER,
+    cache_read_tokens INTEGER,
+    cache_creation_tokens INTEGER,
+    duration_ms INTEGER,
+    api_duration_ms INTEGER,
+    lines_added INTEGER,
+    lines_removed INTEGER,
+    model_name TEXT,
+    raw_payload TEXT NOT NULL
+)
+"""
+
+_CREATE_STATUSLINE_SESSION_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_statusline_session
+ON claude_statusline(session_id)
+"""
+
+_CREATE_STATUSLINE_RECEIVED_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_statusline_received
+ON claude_statusline(received_at)
+"""
+
 _CREATE_EVENTS_SESSION_IDX = """
 CREATE INDEX IF NOT EXISTS idx_claude_events_session
 ON claude_events(session_id)
@@ -100,10 +138,13 @@ async def create_tables(db: aiosqlite.Connection) -> None:
     await db.execute(_CREATE_EVENTS)
     await db.execute(_CREATE_COSTS)
     await db.execute(_CREATE_LIMITS)
+    await db.execute(_CREATE_STATUSLINE)
     await db.execute(_CREATE_EVENTS_SESSION_IDX)
     await db.execute(_CREATE_EVENTS_RECEIVED_IDX)
     await db.execute(_CREATE_AGENTS_SESSION_IDX)
     await db.execute(_CREATE_LIMITS_FETCHED_IDX)
+    await db.execute(_CREATE_STATUSLINE_SESSION_IDX)
+    await db.execute(_CREATE_STATUSLINE_RECEIVED_IDX)
     await db.commit()
 
 
@@ -512,3 +553,96 @@ async def get_limits_history(
     cursor = await db.execute(query, params)
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
+
+
+# ---- Statusline CRUD ----
+
+
+async def insert_statusline(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    received_at: float,
+    cost_usd: float | None = None,
+    total_input_tokens: int | None = None,
+    total_output_tokens: int | None = None,
+    context_used_pct: float | None = None,
+    context_window_size: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_creation_tokens: int | None = None,
+    duration_ms: int | None = None,
+    api_duration_ms: int | None = None,
+    lines_added: int | None = None,
+    lines_removed: int | None = None,
+    model_name: str | None = None,
+    raw_payload: str,
+) -> None:
+    """Insert a statusline snapshot with extracted numerics."""
+    await db.execute(
+        """
+        INSERT INTO claude_statusline
+            (session_id, received_at, cost_usd, total_input_tokens,
+             total_output_tokens, context_used_pct, context_window_size,
+             cache_read_tokens, cache_creation_tokens, duration_ms,
+             api_duration_ms, lines_added, lines_removed, model_name,
+             raw_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            session_id,
+            received_at,
+            cost_usd,
+            total_input_tokens,
+            total_output_tokens,
+            context_used_pct,
+            context_window_size,
+            cache_read_tokens,
+            cache_creation_tokens,
+            duration_ms,
+            api_duration_ms,
+            lines_added,
+            lines_removed,
+            model_name,
+            raw_payload,
+        ),
+    )
+    await db.commit()
+
+
+async def update_session_statusline(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    cost_usd: float | None = None,
+    context_used_pct: float | None = None,
+    model_name: str | None = None,
+    total_input_tokens: int | None = None,
+    total_output_tokens: int | None = None,
+    lines_added: int | None = None,
+    lines_removed: int | None = None,
+) -> None:
+    """Update a session's cost/context/model/token/lines fields."""
+    await db.execute(
+        """
+        UPDATE claude_sessions SET
+            cost_usd = COALESCE(?, cost_usd),
+            context_used_pct = COALESCE(?, context_used_pct),
+            model_name = COALESCE(?, model_name),
+            total_input_tokens = COALESCE(?, total_input_tokens),
+            total_output_tokens = COALESCE(?, total_output_tokens),
+            lines_added = COALESCE(?, lines_added),
+            lines_removed = COALESCE(?, lines_removed)
+        WHERE session_id = ?
+        """,
+        (
+            cost_usd,
+            context_used_pct,
+            model_name,
+            total_input_tokens,
+            total_output_tokens,
+            lines_added,
+            lines_removed,
+            session_id,
+        ),
+    )
+    await db.commit()

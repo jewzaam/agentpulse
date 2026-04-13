@@ -37,6 +37,9 @@ class _SuppressConnectionReset(logging.Filter):
 
 logging.getLogger("asyncio").addFilter(_SuppressConnectionReset())
 
+# Suppress noisy third-party debug logging
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+
 
 async def _discovery_loop(
     db: aiosqlite.Connection,

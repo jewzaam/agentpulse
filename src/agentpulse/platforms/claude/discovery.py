@@ -144,6 +144,30 @@ async def run_discovery_tick(
                     "timestamp": time.time(),
                 }
             )
+        elif (
+            not pid_alive
+            and existing.get("pid_alive")
+            and existing.get("ended_at") is None
+        ):
+            ended_at = time.time()
+            await schema.end_session(db, session_id=sid, ended_at=ended_at)
+            logger.info(
+                "session pid died session=%s pid=%d",
+                sid,
+                session["pid"],
+            )
+            await manager.broadcast(
+                {
+                    "type": "session_ended",
+                    "platform": "claude",
+                    "session_id": sid,
+                    "event_name": None,
+                    "tool_name": None,
+                    "agent_id": None,
+                    "cwd": session["cwd"],
+                    "timestamp": ended_at,
+                }
+            )
 
     # Check for sessions that are in DB as alive but not in discovery
     alive_sessions = await schema.get_sessions_needing_pid_check(db)
