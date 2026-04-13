@@ -8,12 +8,14 @@ Non-blocking — if the service is down, exits silently.
 
 Requires --config pointing to the same config.json the service uses.
 
-Zero dependencies — stdlib only.
+Uses psutil (if available) to find the Claude Code PID via process
+ancestry. Falls back to os.getppid() if psutil is not installed.
 """
 
 import json
 import logging
 import logging.handlers
+import os
 import platform
 import sys
 import urllib.request
@@ -88,7 +90,8 @@ def main() -> None:
 
     config = _load_config(config_path)
     url = _get_url(config)
-    debug = str(config.get("debug", "")).lower() in ("1", "true", "yes")
+    log_level = str(config.get("log_level", "INFO")).upper()
+    debug = log_level == "DEBUG"
 
     # --marker flag: inject a labeled boundary line and exit
     if len(sys.argv) >= 2 and sys.argv[1] == "--marker":
@@ -109,6 +112,23 @@ def main() -> None:
         try:
             payload = json.loads(data)
             payload["source_system"] = platform.node()
+
+            # Walk the process ancestry to find the Claude Code PID.
+            try:
+                import psutil
+
+                claude_pid = 0
+                for proc in psutil.Process(os.getpid()).parents():
+                    try:
+                        if "claude" in proc.name().lower():
+                            claude_pid = proc.pid
+                            break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        break
+                payload["pid"] = claude_pid or os.getppid()
+            except ImportError:
+                payload["pid"] = os.getppid()
+
             data = json.dumps(payload)
         except (json.JSONDecodeError, TypeError):
             pass

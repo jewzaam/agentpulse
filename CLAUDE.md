@@ -31,7 +31,9 @@ Key settings: `host`, `port`, `db_path`, `log_file`, `log_level`, `discovery_int
 in-place, preserves other hooks).
 
 The relay script (`scripts/hook_relay.py`) reads JSON from stdin, injects `source_system`
-(hostname), and POSTs to agentpulse. Reads host/port from the same config file.
+(hostname) and `pid` (parent process = Claude Code), and POSTs to agentpulse.
+Reads host/port from the same config file. The PID enables liveness detection and
+entrypoint inference (VS Code, Cursor, terminal) via process tree inspection.
 
 ## Statusline Integration
 
@@ -51,7 +53,7 @@ src/agentpulse/
 ├── websocket.py                  # ConnectionManager + /ws endpoint
 ├── platforms/claude/
 │   ├── hooks.py                  # POST /hooks/claude, /statusline/claude, /costs/claude
-│   ├── discovery.py              # Session file scanner + PID validation
+│   ├── discovery.py              # PID liveness checks + entrypoint detection
 │   ├── limits.py                 # OAuth API usage limit fetching + DB cache
 │   ├── schema.py                 # claude_* table DDL + all CRUD queries
 │   └── models.py                 # Claude-specific Pydantic models + derive_state()
@@ -108,8 +110,8 @@ or send its own keep-alive pings.
 
 - `db.py` uses a module-level singleton (`_db`). Tests must call `close_db()` in teardown
   to avoid leaking connections across test files.
-- `discover_sessions()` is sync I/O wrapped in `asyncio.to_thread()` — it reads files
-  from `~/.claude/sessions/`. Tests mock `validate_pid` to avoid psutil hitting real PIDs.
+- `validate_pid()` and `detect_entrypoint()` are sync and wrapped in
+  `asyncio.to_thread()`. Tests mock psutil to avoid hitting real PIDs.
 - The `src/` layout means Makefile targets use `SRC_DIR = src/$(PACKAGE_NAME)` for format,
   lint, typecheck — not the bare package name.
 - Windows `ProactorEventLoop` raises `ConnectionResetError` when hook relay clients

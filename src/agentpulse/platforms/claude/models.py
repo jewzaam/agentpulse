@@ -32,6 +32,7 @@ class ClaudeHookPayload(BaseModel):
     agent_type: str = ""
     cwd: str = ""
     source_system: str = ""
+    pid: int = 0
 
     @field_validator("session_id")
     @classmethod

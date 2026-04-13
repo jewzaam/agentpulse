@@ -180,10 +180,20 @@ async def upsert_session(
             last_event_at = COALESCE(excluded.last_event_at, last_event_at),
             cwd = CASE WHEN excluded.cwd != '' THEN excluded.cwd ELSE cwd END,
             pid = CASE WHEN excluded.pid != 0 THEN excluded.pid ELSE pid END,
+            entrypoint = CASE
+                WHEN excluded.entrypoint != 'cli' THEN excluded.entrypoint
+                ELSE entrypoint
+            END,
+            started_at = CASE
+                WHEN started_at = 0 THEN excluded.started_at
+                ELSE started_at
+            END,
             source_system = CASE
                 WHEN excluded.source_system != '' THEN excluded.source_system
                 ELSE source_system
-            END
+            END,
+            pid_alive = 1,
+            ended_at = NULL
         """,
         (
             session_id,
@@ -227,52 +237,6 @@ async def update_session_pid_alive(
     await db.execute(
         "UPDATE claude_sessions SET pid_alive = ? WHERE session_id = ?",
         (1 if pid_alive else 0, session_id),
-    )
-    await db.commit()
-
-
-async def update_session_discovery(
-    db: aiosqlite.Connection,
-    *,
-    session_id: str,
-    pid: int,
-    cwd: str,
-    entrypoint: str,
-    started_at: int,
-    pid_alive: bool,
-    branch: str,
-    source_system: str = "",
-    discovered_at: float | None = None,
-) -> None:
-    """Insert or update a session from discovery (file scan)."""
-    now = time.time() if discovered_at is None else discovered_at
-    await db.execute(
-        """
-        INSERT INTO claude_sessions
-            (session_id, pid, cwd, entrypoint, started_at,
-             pid_alive, branch, discovered_at, source_system)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET
-            pid = excluded.pid,
-            cwd = excluded.cwd,
-            pid_alive = excluded.pid_alive,
-            branch = excluded.branch,
-            source_system = CASE
-                WHEN excluded.source_system != '' THEN excluded.source_system
-                ELSE source_system
-            END
-        """,
-        (
-            session_id,
-            pid,
-            cwd,
-            entrypoint,
-            started_at,
-            1 if pid_alive else 0,
-            branch,
-            now,
-            source_system,
-        ),
     )
     await db.commit()
 

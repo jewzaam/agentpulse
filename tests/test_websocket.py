@@ -77,6 +77,12 @@ class TestWebSocketEndpoint:
                     "tool_name": "Bash",
                 },
             )
+            # First message is session_discovered (new session)
+            data = ws.receive_json()
+            assert data["type"] == "session_discovered"
+            assert data["session_id"] == "s1"
+
+            # Second message is the hook_event itself
             data = ws.receive_json()
             assert data["type"] == "hook_event"
             assert data["session_id"] == "s1"
