@@ -57,12 +57,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup and shutdown."""
     settings = get_settings()
     logger.info(
-        "starting host=%s port=%d db=%s log_level=%s discovery_interval=%ds",
+        "starting host=%s port=%d db=%s log_level=%s"
+        " discovery_interval=%ds fetch_limits=%s",
         settings.host,
         settings.port,
         settings.db_path,
         settings.log_level,
         settings.discovery_interval_seconds,
+        settings.fetch_limits,
     )
     db = await init_db(db_path=settings.db_path)
 
