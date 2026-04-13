@@ -18,6 +18,7 @@ import aiosqlite
 
 from agentpulse import config
 from agentpulse.platforms.claude import schema
+from agentpulse.websocket import manager
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,14 @@ async def get_limits(db: aiosqlite.Connection) -> dict | None:
         if new_row is not None:
             result = _format_row(new_row, now=fetched_at)
             _cached_limits = result
+            await manager.broadcast(
+                {
+                    "type": "limits_updated",
+                    "platform": "claude",
+                    "timestamp": fetched_at,
+                    "limits": result,
+                }
+            )
             return result
 
     _consecutive_failures += 1
