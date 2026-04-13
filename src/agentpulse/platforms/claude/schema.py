@@ -64,6 +64,19 @@ CREATE TABLE IF NOT EXISTS claude_costs (
 )
 """
 
+_CREATE_LIMITS = """
+CREATE TABLE IF NOT EXISTS claude_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fetched_at REAL NOT NULL,
+    raw_response TEXT NOT NULL
+)
+"""
+
+_CREATE_LIMITS_FETCHED_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_limits_fetched
+ON claude_limits(fetched_at)
+"""
+
 _CREATE_EVENTS_SESSION_IDX = """
 CREATE INDEX IF NOT EXISTS idx_claude_events_session
 ON claude_events(session_id)
@@ -86,9 +99,11 @@ async def create_tables(db: aiosqlite.Connection) -> None:
     await db.execute(_CREATE_AGENTS)
     await db.execute(_CREATE_EVENTS)
     await db.execute(_CREATE_COSTS)
+    await db.execute(_CREATE_LIMITS)
     await db.execute(_CREATE_EVENTS_SESSION_IDX)
     await db.execute(_CREATE_EVENTS_RECEIVED_IDX)
     await db.execute(_CREATE_AGENTS_SESSION_IDX)
+    await db.execute(_CREATE_LIMITS_FETCHED_IDX)
     await db.commit()
 
 
@@ -441,6 +456,57 @@ async def get_all_events(
         params.append(until)
 
     query += " ORDER BY received_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    cursor = await db.execute(query, params)
+    rows = await cursor.fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---- Limits CRUD ----
+
+
+async def insert_limits(
+    db: aiosqlite.Connection,
+    *,
+    fetched_at: float,
+    raw_response: str,
+) -> None:
+    """Insert a new limits snapshot."""
+    await db.execute(
+        "INSERT INTO claude_limits (fetched_at, raw_response) VALUES (?, ?)",
+        (fetched_at, raw_response),
+    )
+    await db.commit()
+
+
+async def get_latest_limits(
+    db: aiosqlite.Connection,
+) -> dict | None:
+    """Return the most recent limits row."""
+    cursor = await db.execute(
+        "SELECT * FROM claude_limits ORDER BY fetched_at DESC LIMIT 1"
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def get_limits_history(
+    db: aiosqlite.Connection,
+    *,
+    since: float | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Return historical limits snapshots."""
+    query = "SELECT * FROM claude_limits"
+    params: list[object] = []
+
+    if since is not None:
+        query += " WHERE fetched_at > ?"
+        params.append(since)
+
+    query += " ORDER BY fetched_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
 
     cursor = await db.execute(query, params)

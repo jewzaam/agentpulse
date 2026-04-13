@@ -79,6 +79,7 @@ class SummaryResponse(BaseModel):
     active_sessions: int = 0
     state_breakdown: dict[str, int] = {}
     total_agents: int = 0
+    limits: dict | None = None
 
 
 class WebSocketMessage(BaseModel):

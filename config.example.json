@@ -4,5 +4,6 @@
   "db_path": "~/.claude/agentpulse/agentpulse.db",
   "log_file": "~/.claude/agentpulse/agentpulse.log",
   "log_level": "INFO",
-  "discovery_interval_seconds": 5
+  "discovery_interval_seconds": 5,
+  "fetch_limits": false
 }

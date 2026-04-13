@@ -33,24 +33,26 @@ class Settings:
     log_file: Path = field(default_factory=lambda: DEFAULT_LOG_FILE)
     log_level: str = DEFAULT_LOG_LEVEL
     discovery_interval_seconds: int = DEFAULT_DISCOVERY_INTERVAL_SECONDS
+    fetch_limits: bool = False
 
     @classmethod
     def from_config(cls, *, config_path: Path) -> "Settings":
         """Load settings from a JSON config file."""
         data: dict = {}
-        if config_path.exists():
+        resolved = config_path.expanduser()
+        if resolved.exists():
             try:
-                raw = json.loads(config_path.read_text(encoding="utf-8"))
+                raw = json.loads(resolved.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     data = raw
             except (json.JSONDecodeError, OSError):
                 pass
 
         db_path_str = data.get("db_path")
-        db_path = Path(db_path_str) if db_path_str else DEFAULT_DB_PATH
+        db_path = Path(db_path_str).expanduser() if db_path_str else DEFAULT_DB_PATH
 
         log_file_str = data.get("log_file")
-        log_file = Path(log_file_str) if log_file_str else DEFAULT_LOG_FILE
+        log_file = Path(log_file_str).expanduser() if log_file_str else DEFAULT_LOG_FILE
 
         log_level = data.get("log_level", DEFAULT_LOG_LEVEL)
 
@@ -66,6 +68,8 @@ class Settings:
                     DEFAULT_DISCOVERY_INTERVAL_SECONDS,
                 )
             ),
+            fetch_limits=str(data.get("fetch_limits", "")).lower()
+            in ("1", "true", "yes"),
         )
 
 
