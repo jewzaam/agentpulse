@@ -176,6 +176,43 @@ async def receive_statusline(body: dict) -> dict:
     if not session_id:
         return {"status": "ignored", "reason": "no session_id"}
 
+    workspace = body.get("workspace") or {}
+    cwd = workspace.get("project_dir") or body.get("cwd") or ""
+    pid = body.get("pid", 0)
+    source_system = body.get("source_system", "")
+
+    existing = await schema.get_session(db, session_id=session_id)
+    if existing is None:
+        entrypoint = "cli"
+        if pid:
+            entrypoint = await asyncio.to_thread(detect_entrypoint, pid=pid)
+        await schema.upsert_session(
+            db,
+            session_id=session_id,
+            pid=pid,
+            cwd=cwd,
+            entrypoint=entrypoint,
+            started_at=int(received_at * 1000),
+            source_system=source_system,
+        )
+        logger.info(
+            "new session from statusline session=%s cwd=%s",
+            session_id,
+            cwd,
+        )
+        await manager.broadcast(
+            {
+                "type": "session_discovered",
+                "platform": "claude",
+                "session_id": session_id,
+                "event_name": None,
+                "tool_name": None,
+                "agent_id": None,
+                "cwd": cwd or None,
+                "timestamp": received_at,
+            }
+        )
+
     cost = body.get("cost") or {}
     ctx = body.get("context_window") or {}
     current_usage = ctx.get("current_usage") or {}
