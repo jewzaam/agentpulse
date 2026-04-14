@@ -2,6 +2,7 @@
 """Tests for POST /statusline/claude endpoint."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -152,3 +153,100 @@ class TestReceiveStatusline:
         rows = run_async(cursor.fetchall())
         costs = [dict(r)["cost_usd"] for r in rows]
         assert costs == [1.0, 2.0, 3.0]
+
+
+class TestStatuslineSessionDiscovery:
+    """Statusline creates sessions when they don't exist yet."""
+
+    def test_creates_session_for_unknown_id(self, client, db) -> None:
+        resp = client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+        assert resp.status_code == 200
+
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row is not None
+        assert row["cwd"] == "/tmp/project"
+        assert row["pid"] == 0
+        assert row["entrypoint"] == "cli"
+
+    def test_broadcasts_session_discovered_for_new(self, client, db) -> None:
+        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+            client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+
+        calls = [c.args[0] for c in mock_bc.call_args_list]
+        discovered = [c for c in calls if c["type"] == "session_discovered"]
+        assert len(discovered) == 1
+        assert discovered[0]["session_id"] == "s1"
+        assert discovered[0]["cwd"] == "/tmp/project"
+        assert discovered[0]["platform"] == "claude"
+
+    def test_no_duplicate_discovery_for_existing(self, client, db) -> None:
+        # Create session via hook first
+        client.post(
+            "/hooks/claude",
+            json={
+                "session_id": "s1",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+            },
+        )
+        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+            client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+
+        calls = [c.args[0] for c in mock_bc.call_args_list]
+        discovered = [c for c in calls if c["type"] == "session_discovered"]
+        assert len(discovered) == 0
+        updates = [c for c in calls if c["type"] == "statusline_update"]
+        assert len(updates) == 1
+
+    def test_hook_enriches_statusline_created_session(self, client, db) -> None:
+        # Create via statusline (pid=0)
+        client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["pid"] == 0
+
+        # Hook arrives with real pid
+        client.post(
+            "/hooks/claude",
+            json={
+                "session_id": "s1",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "pid": 12345,
+                "cwd": "/tmp/project",
+                "source_system": "myhost",
+            },
+        )
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["pid"] == 12345
+        assert row["source_system"] == "myhost"
+
+    def test_cwd_fallback_chain(self, client, db) -> None:
+        # No workspace, but top-level cwd
+        data = {
+            "session_id": "s-fallback",
+            "cwd": "/fallback/path",
+            "model": {"display_name": "Sonnet"},
+        }
+        client.post("/statusline/claude", json=data)
+
+        row = run_async(schema.get_session(db, session_id="s-fallback"))
+        assert row is not None
+        assert row["cwd"] == "/fallback/path"
+
+    def test_statusline_with_injected_pid_and_source(self, client, db) -> None:
+        data = {
+            **_SAMPLE_STATUSLINE,
+            "session_id": "s-injected",
+            "pid": 9999,
+            "source_system": "remote-host",
+        }
+        with patch(
+            "agentpulse.platforms.claude.hooks.detect_entrypoint",
+            return_value="vscode",
+        ):
+            client.post("/statusline/claude", json=data)
+
+        row = run_async(schema.get_session(db, session_id="s-injected"))
+        assert row["pid"] == 9999
+        assert row["source_system"] == "remote-host"
+        assert row["entrypoint"] == "vscode"
