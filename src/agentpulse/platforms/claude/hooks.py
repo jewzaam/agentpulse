@@ -101,6 +101,10 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
     )
 
     existing = await schema.get_session(db, session_id=payload.session_id)
+    is_new = existing is None
+    is_resumed = existing is not None and (
+        existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+    )
 
     entrypoint = await asyncio.to_thread(detect_entrypoint, pid=payload.pid)
 
@@ -117,13 +121,21 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
         source_system=payload.source_system,
     )
 
-    if existing is None:
-        logger.info(
-            "new session from hook session=%s pid=%d cwd=%s",
-            payload.session_id,
-            payload.pid,
-            payload.cwd,
-        )
+    if is_new or is_resumed:
+        if is_new:
+            logger.info(
+                "new session from hook session=%s pid=%d cwd=%s",
+                payload.session_id,
+                payload.pid,
+                payload.cwd,
+            )
+        else:
+            logger.info(
+                "session resumed from hook session=%s pid=%d cwd=%s",
+                payload.session_id,
+                payload.pid,
+                payload.cwd,
+            )
         await manager.broadcast(
             {
                 "type": "session_discovered",
@@ -182,7 +194,12 @@ async def receive_statusline(body: dict) -> dict:
     source_system = body.get("source_system", "")
 
     existing = await schema.get_session(db, session_id=session_id)
-    if existing is None:
+    is_new = existing is None
+    is_resumed = existing is not None and (
+        existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+    )
+
+    if is_new or is_resumed:
         entrypoint = "cli"
         if pid:
             entrypoint = await asyncio.to_thread(detect_entrypoint, pid=pid)
@@ -195,11 +212,18 @@ async def receive_statusline(body: dict) -> dict:
             started_at=int(received_at * 1000),
             source_system=source_system,
         )
-        logger.info(
-            "new session from statusline session=%s cwd=%s",
-            session_id,
-            cwd,
-        )
+        if is_new:
+            logger.info(
+                "new session from statusline session=%s cwd=%s",
+                session_id,
+                cwd,
+            )
+        else:
+            logger.info(
+                "session resumed from statusline session=%s cwd=%s",
+                session_id,
+                cwd,
+            )
         await manager.broadcast(
             {
                 "type": "session_discovered",
