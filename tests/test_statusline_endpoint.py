@@ -233,6 +233,27 @@ class TestStatuslineSessionDiscovery:
         assert row is not None
         assert row["cwd"] == "/fallback/path"
 
+    def test_resurrects_ended_session(self, client, db) -> None:
+        client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+        run_async(schema.end_session(db, session_id="s1", ended_at=1.0))
+        run_async(schema.update_session_pid_alive(db, session_id="s1", pid_alive=False))
+
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["ended_at"] is not None
+        assert row["pid_alive"] == 0
+
+        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+            client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
+
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["ended_at"] is None
+        assert row["pid_alive"] == 1
+
+        calls = [c.args[0] for c in mock_bc.call_args_list]
+        discovered = [c for c in calls if c["type"] == "session_discovered"]
+        assert len(discovered) == 1
+        assert discovered[0]["session_id"] == "s1"
+
     def test_statusline_with_injected_pid_and_source(self, client, db) -> None:
         data = {
             **_SAMPLE_STATUSLINE,
