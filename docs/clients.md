@@ -242,3 +242,25 @@ The REST API includes a `derived_state` field on sessions. This is computed from
 | `Stop` | — | `idle` |
 
 When a session has active agents, the effective state is the highest-priority state across the main session and all agents. Priority (highest first): `permission_required` > `awaiting_input` > `working` > `ready` > `idle`.
+
+## Cost and Token Aggregation
+
+Claude Code tracks cumulative metrics **per process**, not per `session_id`. When a user runs `/clear` inside Claude Code, a new `session_id` is issued but the process keeps its cost/token counters running. AgentPulse stores each `session_id`'s latest snapshot faithfully — so **summing across sessions double-counts**.
+
+**Cumulative per process** (inherited across `/clear`): `cost_usd`, `total_input_tokens`, `total_output_tokens`, `lines_added`, `lines_removed`.
+
+**Per session_id** (reset on `/clear`): `context_used_pct`, `last_event`, `last_tool`, agents.
+
+### Detecting a chain
+
+Sessions sharing `(source_system, pid)` are the same Claude Code process — a chain of `/clear` rotations. The first statusline of each chained session equals the last statusline of the previous one.
+
+### Aggregation recipe
+
+To report accurate cost/token totals:
+
+1. Group sessions by `(source_system, pid)`.
+2. Within each group, pick the session with the highest `last_event_at` (fall back to `started_at` if null).
+3. Use only that one session's `cost_usd` / tokens / lines. Discard the older snapshots in the group.
+
+For per-project (cwd) or per-host totals, sum the per-process latest values across groups. For UI display, collapse chained sessions into a single row representing the live process, and surface the older session_ids as historical clears if needed.
