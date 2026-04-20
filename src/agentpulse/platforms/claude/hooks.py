@@ -10,20 +10,18 @@ import aiosqlite
 from fastapi import APIRouter, Response
 
 from agentpulse.db import get_db
+from agentpulse.events import (
+    broadcast_hook_event,
+    broadcast_session_discovered,
+    broadcast_statusline_update,
+)
 from agentpulse.platforms.claude.discovery import detect_entrypoint
 from agentpulse.platforms.claude.models import ClaudeHookPayload
 from agentpulse.platforms.claude import schema
-from agentpulse.websocket import manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_WS_TYPE_MAP: dict[str, str] = {
-    "SessionEnd": "session_ended",
-    "SubagentStart": "agent_started",
-    "SubagentStop": "agent_stopped",
-}
 
 
 async def _handle_agent_event(
@@ -62,26 +60,6 @@ async def _handle_agent_event(
         )
 
 
-async def _broadcast_event(
-    payload: ClaudeHookPayload,
-    *,
-    event: str,
-    received_at: float,
-) -> None:
-    """Broadcast a hook event to all WebSocket clients."""
-    ws_type = _WS_TYPE_MAP.get(event, "hook_event")
-    await manager.broadcast(
-        {
-            "type": ws_type,
-            "platform": "claude",
-            "session_id": payload.session_id,
-            "event_name": event,
-            "tool_name": payload.tool_name or None,
-            "agent_id": payload.agent_id or None,
-            "cwd": payload.cwd or None,
-            "timestamp": received_at,
-        }
-    )
 
 
 @router.post("/hooks/claude")
@@ -163,20 +141,20 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
                 payload.pid,
                 payload.cwd,
             )
-        await manager.broadcast(
-            {
-                "type": "session_discovered",
-                "platform": "claude",
-                "session_id": payload.session_id,
-                "event_name": None,
-                "tool_name": None,
-                "agent_id": None,
-                "cwd": payload.cwd or None,
-                "timestamp": received_at,
-            }
+        await broadcast_session_discovered(
+            session_id=payload.session_id,
+            cwd=payload.cwd or None,
+            timestamp=received_at,
         )
 
-    await _broadcast_event(payload, event=event, received_at=received_at)
+    await broadcast_hook_event(
+        session_id=payload.session_id,
+        event_name=event,
+        tool_name=payload.tool_name or None,
+        agent_id=payload.agent_id or None,
+        cwd=payload.cwd or None,
+        timestamp=received_at,
+    )
 
     return {"status": "ok"}
 
@@ -232,17 +210,10 @@ async def receive_statusline(body: dict) -> dict:
                 session_id,
                 cwd,
             )
-        await manager.broadcast(
-            {
-                "type": "session_discovered",
-                "platform": "claude",
-                "session_id": session_id,
-                "event_name": None,
-                "tool_name": None,
-                "agent_id": None,
-                "cwd": cwd or None,
-                "timestamp": received_at,
-            }
+        await broadcast_session_discovered(
+            session_id=session_id,
+            cwd=cwd or None,
+            timestamp=received_at,
         )
 
     cost = body.get("cost") or {}
@@ -309,20 +280,16 @@ async def receive_statusline(body: dict) -> dict:
         model_name or "?",
     )
 
-    await manager.broadcast(
-        {
-            "type": "statusline_update",
-            "platform": "claude",
-            "session_id": session_id,
-            "cost_usd": cost_usd,
-            "context_used_pct": context_used_pct,
-            "model_name": model_name,
-            "total_input_tokens": total_input_tokens,
-            "total_output_tokens": total_output_tokens,
-            "lines_added": lines_added,
-            "lines_removed": lines_removed,
-            "timestamp": received_at,
-        }
+    await broadcast_statusline_update(
+        session_id=session_id,
+        cost_usd=cost_usd,
+        context_used_pct=context_used_pct,
+        model_name=model_name,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        lines_added=lines_added,
+        lines_removed=lines_removed,
+        timestamp=received_at,
     )
 
     return {"status": "ok"}
