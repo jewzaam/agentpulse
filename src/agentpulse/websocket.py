@@ -45,9 +45,7 @@ class ConnectionManager:
             try:
                 await ws.send_text(payload)
             except Exception as exc:
-                logger.debug(
-                    "websocket send failed type=%s: %s", msg_type, exc
-                )
+                logger.debug("websocket send failed type=%s: %s", msg_type, exc)
                 dead.append(ws)
 
         for ws in dead:

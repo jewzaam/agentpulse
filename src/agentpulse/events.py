@@ -94,9 +94,7 @@ async def broadcast_hook_event(
         "SubagentStop": "agent_stopped",
     }
     ws_type = event_type_map.get(event_name, "hook_event")
-    logger.debug(
-        "broadcast %s session=%s event=%s", ws_type, session_id, event_name
-    )
+    logger.debug("broadcast %s session=%s event=%s", ws_type, session_id, event_name)
 
     await manager.broadcast(
         {

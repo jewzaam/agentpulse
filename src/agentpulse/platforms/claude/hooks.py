@@ -60,8 +60,6 @@ async def _handle_agent_event(
         )
 
 
-
-
 @router.post("/hooks/claude")
 async def receive_hook(payload: ClaudeHookPayload) -> dict:
     """Process an incoming Claude Code hook event."""
