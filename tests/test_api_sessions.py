@@ -135,6 +135,96 @@ class TestGetSessionEvents:
         resp = client.get("/api/v1/sessions/nonexistent/events")
         assert resp.status_code == 404
 
+    def test_pagination_with_limit(self, client, db) -> None:
+        run_async(_seed_session(db))
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E1", received_at=1.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E2", received_at=2.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E3", received_at=3.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E4", received_at=4.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E5", received_at=5.0)
+        )
+
+        resp = client.get("/api/v1/sessions/s1/events?limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+
+    def test_pagination_with_offset(self, client, db) -> None:
+        run_async(_seed_session(db))
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E1", received_at=1.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E2", received_at=2.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E3", received_at=3.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E4", received_at=4.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E5", received_at=5.0)
+        )
+
+        resp = client.get("/api/v1/sessions/s1/events?offset=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 3
+
+    def test_since_filter(self, client, db) -> None:
+        run_async(_seed_session(db))
+        run_async(
+            schema.insert_event(
+                db, session_id="s1", event_name="OldEvent", received_at=1.0
+            )
+        )
+        run_async(
+            schema.insert_event(
+                db, session_id="s1", event_name="NewEvent", received_at=5.0
+            )
+        )
+
+        resp = client.get("/api/v1/sessions/s1/events?since=3.0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["event_name"] == "NewEvent"
+
+    def test_limit_and_offset_together(self, client, db) -> None:
+        run_async(_seed_session(db))
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E1", received_at=1.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E2", received_at=2.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E3", received_at=3.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E4", received_at=4.0)
+        )
+        run_async(
+            schema.insert_event(db, session_id="s1", event_name="E5", received_at=5.0)
+        )
+
+        resp = client.get("/api/v1/sessions/s1/events?limit=2&offset=1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["event_name"] == "E4"
+        assert data[1]["event_name"] == "E3"
+
 
 class TestGetSessionAgents:
     def test_returns_agents(self, client, db) -> None:
