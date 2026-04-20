@@ -95,10 +95,14 @@ async def list_sessions(
     """List all sessions across platforms."""
     db = await get_db()
     rows = await schema.get_all_sessions(db, active=active)
+    session_ids = [row["session_id"] for row in rows]
+    agents_by_session = await schema.get_agents_by_session_ids(
+        db, session_ids=session_ids
+    )
 
     results: list[SessionResponse] = []
     for row in rows:
-        agents = await schema.get_session_agents(db, session_id=row["session_id"])
+        agents = agents_by_session.get(row["session_id"], [])
         active_agents = [a for a in agents if a.get("ended_at") is None]
         agent_states = [
             derive_state(
@@ -272,12 +276,16 @@ async def get_summary() -> SummaryResponse:
     """Get aggregate stats across all sessions."""
     db = await get_db()
     rows = await schema.get_all_sessions(db, active=True)
+    session_ids = [row["session_id"] for row in rows]
+    agents_by_session = await schema.get_agents_by_session_ids(
+        db, session_ids=session_ids
+    )
 
     state_breakdown: dict[str, int] = {}
     total_agents = 0
 
     for row in rows:
-        agents = await schema.get_session_agents(db, session_id=row["session_id"])
+        agents = agents_by_session.get(row["session_id"], [])
         active_agents = [a for a in agents if a.get("ended_at") is None]
         total_agents += len(active_agents)
 

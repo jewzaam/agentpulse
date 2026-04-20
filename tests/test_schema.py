@@ -279,6 +279,38 @@ class TestAgentCrud:
         assert agents[0]["ended_at"] == 99.0
 
 
+class TestBulkAgentFetch:
+    async def test_returns_grouped_agents(self, db) -> None:
+        await schema.upsert_session(db, session_id="s1", pid=1, cwd="/a")
+        await schema.upsert_session(db, session_id="s2", pid=2, cwd="/b")
+        await schema.upsert_agent(
+            db, agent_id="a1", session_id="s1", last_event="PreToolUse"
+        )
+        await schema.upsert_agent(
+            db, agent_id="a2", session_id="s1", last_event="Stop"
+        )
+        await schema.upsert_agent(
+            db, agent_id="a3", session_id="s2", last_event="PreToolUse"
+        )
+        result = await schema.get_agents_by_session_ids(
+            db, session_ids=["s1", "s2"]
+        )
+        assert len(result["s1"]) == 2
+        assert len(result["s2"]) == 1
+        assert result["s2"][0]["agent_id"] == "a3"
+
+    async def test_empty_session_ids(self, db) -> None:
+        result = await schema.get_agents_by_session_ids(db, session_ids=[])
+        assert result == {}
+
+    async def test_session_with_no_agents(self, db) -> None:
+        await schema.upsert_session(db, session_id="s1", pid=1, cwd="/a")
+        result = await schema.get_agents_by_session_ids(
+            db, session_ids=["s1"]
+        )
+        assert result["s1"] == []
+
+
 class TestEventCrud:
     async def test_insert_and_query(self, db) -> None:
         await schema.insert_event(

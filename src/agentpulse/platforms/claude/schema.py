@@ -381,6 +381,28 @@ async def get_session_agents(
     return [dict(row) for row in rows]
 
 
+async def get_agents_by_session_ids(
+    db: aiosqlite.Connection,
+    *,
+    session_ids: list[str],
+) -> dict[str, list[dict]]:
+    """Return agents grouped by session_id for multiple sessions."""
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" for _ in session_ids)
+    cursor = await db.execute(
+        f"SELECT * FROM claude_agents WHERE session_id IN ({placeholders})"
+        " ORDER BY started_at",
+        session_ids,
+    )
+    rows = await cursor.fetchall()
+    grouped: dict[str, list[dict]] = {sid: [] for sid in session_ids}
+    for row in rows:
+        d = dict(row)
+        grouped.setdefault(d["session_id"], []).append(d)
+    return grouped
+
+
 # ---- Event CRUD ----
 
 
