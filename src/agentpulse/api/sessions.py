@@ -353,9 +353,7 @@ async def get_limits_history(
         try:
             data = json.loads(row["raw_response"])
         except (json.JSONDecodeError, TypeError):
-            logger.warning(
-                "corrupted limits row id=%s, skipping", row["id"]
-            )
+            logger.warning("corrupted limits row id=%s, skipping", row["id"])
             continue
         results.append(
             {

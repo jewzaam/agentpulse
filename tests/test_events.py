@@ -16,9 +16,7 @@ class TestBroadcastSessionDiscovered:
     async def test_message_shape(self, mock_broadcast) -> None:
         from agentpulse.events import broadcast_session_discovered
 
-        await broadcast_session_discovered(
-            session_id="s1", cwd="/tmp", timestamp=1.0
-        )
+        await broadcast_session_discovered(session_id="s1", cwd="/tmp", timestamp=1.0)
         msg = mock_broadcast.call_args[0][0]
         assert msg["type"] == "session_discovered"
         assert msg["platform"] == "claude"
@@ -34,9 +32,7 @@ class TestBroadcastSessionEnded:
     async def test_message_shape(self, mock_broadcast) -> None:
         from agentpulse.events import broadcast_session_ended
 
-        await broadcast_session_ended(
-            session_id="s1", cwd="/tmp", timestamp=2.0
-        )
+        await broadcast_session_ended(session_id="s1", cwd="/tmp", timestamp=2.0)
         msg = mock_broadcast.call_args[0][0]
         assert msg["type"] == "session_ended"
         assert msg["session_id"] == "s1"
@@ -46,9 +42,7 @@ class TestBroadcastSessionCleared:
     async def test_message_shape(self, mock_broadcast) -> None:
         from agentpulse.events import broadcast_session_cleared
 
-        await broadcast_session_cleared(
-            session_id="s1", cwd="/tmp", timestamp=3.0
-        )
+        await broadcast_session_cleared(session_id="s1", cwd="/tmp", timestamp=3.0)
         msg = mock_broadcast.call_args[0][0]
         assert msg["type"] == "session_cleared"
         assert msg["event_name"] == "clear_state"
