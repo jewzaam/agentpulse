@@ -2,9 +2,12 @@
 """Normalized session endpoints (cross-platform)."""
 
 import json
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 
 from agentpulse.config import get_settings
 from agentpulse.db import get_db
@@ -121,6 +124,7 @@ async def get_session(session_id: str) -> SessionDetailResponse:
     db = await get_db()
     row = await schema.get_session(db, session_id=session_id)
     if row is None:
+        logger.info("session not found session_id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
     agents = await schema.get_session_agents(db, session_id=session_id)
@@ -178,6 +182,7 @@ async def clear_session(session_id: str) -> dict:
     db = await get_db()
     row = await schema.get_session(db, session_id=session_id)
     if row is None:
+        logger.info("session not found session_id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
     import time
@@ -222,6 +227,7 @@ async def get_session_events(
     db = await get_db()
     row = await schema.get_session(db, session_id=session_id)
     if row is None:
+        logger.info("session not found session_id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
     events = await schema.get_session_events(
@@ -254,6 +260,7 @@ async def get_session_agents(
     db = await get_db()
     row = await schema.get_session(db, session_id=session_id)
     if row is None:
+        logger.info("session not found session_id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
     agents = await schema.get_session_agents(db, session_id=session_id)
@@ -340,12 +347,21 @@ async def get_limits_history(
     db = await get_db()
     rows = await schema.get_limits_history(db, since=since, limit=limit, offset=offset)
     now = time.time()
-    return [
-        {
-            "id": row["id"],
-            "fetched_at": row["fetched_at"],
-            "age_seconds": now - row["fetched_at"],
-            "data": json.loads(row["raw_response"]),
-        }
-        for row in rows
-    ]
+    results = []
+    for row in rows:
+        try:
+            data = json.loads(row["raw_response"])
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "corrupted limits row id=%s, skipping", row["id"]
+            )
+            continue
+        results.append(
+            {
+                "id": row["id"],
+                "fetched_at": row["fetched_at"],
+                "age_seconds": now - row["fetched_at"],
+                "data": data,
+            }
+        )
+    return results
