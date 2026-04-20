@@ -5,14 +5,14 @@ import logging
 
 from fastapi import APIRouter
 
-logger = logging.getLogger(__name__)
-
 from agentpulse.db import get_db
 from agentpulse.platforms.claude.models import (
     ClaudeEventRow,
     ClaudeSessionRow,
 )
 from agentpulse.platforms.claude import schema
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/claude")
 

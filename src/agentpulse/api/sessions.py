@@ -7,8 +7,6 @@ import time
 
 from fastapi import APIRouter, HTTPException
 
-logger = logging.getLogger(__name__)
-
 from agentpulse.config import get_settings
 from agentpulse.db import get_db
 from agentpulse.models import (
@@ -24,6 +22,8 @@ from agentpulse.platforms.claude.models import (
     derive_state,
 )
 from agentpulse.platforms.claude import schema
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
 
