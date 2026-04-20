@@ -108,18 +108,45 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
 
     entrypoint = await asyncio.to_thread(detect_entrypoint, pid=payload.pid)
 
-    await schema.upsert_session(
-        db,
-        session_id=payload.session_id,
-        pid=payload.pid,
-        cwd=payload.cwd,
-        entrypoint=entrypoint,
-        started_at=int(received_at * 1000),
-        last_event=event,
-        last_tool=payload.tool_name or None,
-        last_event_at=received_at,
-        source_system=payload.source_system,
-    )
+    try:
+        await schema.upsert_session(
+            db,
+            session_id=payload.session_id,
+            pid=payload.pid,
+            cwd=payload.cwd,
+            entrypoint=entrypoint,
+            started_at=int(received_at * 1000),
+            last_event=event,
+            last_tool=payload.tool_name or None,
+            last_event_at=received_at,
+            source_system=payload.source_system,
+        )
+
+        await _handle_agent_event(db, payload, event=event, received_at=received_at)
+
+        if event == "SessionEnd":
+            logger.info("session ended session=%s", payload.session_id)
+            await schema.end_session(
+                db, session_id=payload.session_id, ended_at=received_at
+            )
+
+        await schema.insert_event(
+            db,
+            session_id=payload.session_id,
+            agent_id=payload.agent_id or None,
+            event_name=event,
+            tool_name=payload.tool_name or None,
+            cwd=payload.cwd,
+            received_at=received_at,
+            raw_payload=raw,
+        )
+    except aiosqlite.Error:
+        logger.exception(
+            "database error processing hook session=%s event=%s",
+            payload.session_id,
+            event,
+        )
+        return {"status": "error", "reason": "database error"}
 
     if is_new or is_resumed:
         if is_new:
@@ -148,25 +175,6 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
                 "timestamp": received_at,
             }
         )
-
-    await _handle_agent_event(db, payload, event=event, received_at=received_at)
-
-    if event == "SessionEnd":
-        logger.info("session ended session=%s", payload.session_id)
-        await schema.end_session(
-            db, session_id=payload.session_id, ended_at=received_at
-        )
-
-    await schema.insert_event(
-        db,
-        session_id=payload.session_id,
-        agent_id=payload.agent_id or None,
-        event_name=event,
-        tool_name=payload.tool_name or None,
-        cwd=payload.cwd,
-        received_at=received_at,
-        raw_payload=raw,
-    )
 
     await _broadcast_event(payload, event=event, received_at=received_at)
 
@@ -255,36 +263,43 @@ async def receive_statusline(body: dict) -> dict:
     lines_removed = cost.get("total_lines_removed")
     model_name = model.get("display_name")
 
-    await schema.insert_statusline(
-        db,
-        session_id=session_id,
-        received_at=received_at,
-        cost_usd=cost_usd,
-        total_input_tokens=total_input_tokens,
-        total_output_tokens=total_output_tokens,
-        context_used_pct=context_used_pct,
-        context_window_size=context_window_size,
-        cache_read_tokens=cache_read_tokens,
-        cache_creation_tokens=cache_creation_tokens,
-        duration_ms=duration_ms,
-        api_duration_ms=api_duration_ms,
-        lines_added=lines_added,
-        lines_removed=lines_removed,
-        model_name=model_name,
-        raw_payload=raw,
-    )
+    try:
+        await schema.insert_statusline(
+            db,
+            session_id=session_id,
+            received_at=received_at,
+            cost_usd=cost_usd,
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+            context_used_pct=context_used_pct,
+            context_window_size=context_window_size,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            duration_ms=duration_ms,
+            api_duration_ms=api_duration_ms,
+            lines_added=lines_added,
+            lines_removed=lines_removed,
+            model_name=model_name,
+            raw_payload=raw,
+        )
 
-    await schema.update_session_statusline(
-        db,
-        session_id=session_id,
-        cost_usd=cost_usd,
-        context_used_pct=context_used_pct,
-        model_name=model_name,
-        total_input_tokens=total_input_tokens,
-        total_output_tokens=total_output_tokens,
-        lines_added=lines_added,
-        lines_removed=lines_removed,
-    )
+        await schema.update_session_statusline(
+            db,
+            session_id=session_id,
+            cost_usd=cost_usd,
+            context_used_pct=context_used_pct,
+            model_name=model_name,
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+            lines_added=lines_added,
+            lines_removed=lines_removed,
+        )
+    except aiosqlite.Error:
+        logger.exception(
+            "database error processing statusline session=%s",
+            session_id,
+        )
+        return {"status": "error", "reason": "database error"}
 
     logger.debug(
         "statusline received session=%s cost=%.2f ctx=%s%% model=%s",
