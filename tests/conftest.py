@@ -48,6 +48,14 @@ def _block_real_filesystem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
         return guarded
 
+    _original_open = Path.open
+
+    def _guard_open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if any(c in str(mode) for c in "wax") and not _is_allowed(self):
+            raise PermissionError(f"Test tried to write outside tmp_path: {self}")
+        return _original_open(self, *args, **kwargs)
+
     for method in (
         "write_text",
         "write_bytes",
@@ -57,6 +65,7 @@ def _block_real_filesystem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         "mkdir",
     ):
         monkeypatch.setattr(Path, method, _guard(getattr(Path, method)))
+    monkeypatch.setattr(Path, "open", _guard_open)
 
 
 @pytest.fixture(autouse=True)
