@@ -169,7 +169,7 @@ class TestStatuslineSessionDiscovery:
         assert row["entrypoint"] == "cli"
 
     def test_broadcasts_session_discovered_for_new(self, client, db) -> None:
-        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+        with patch("agentpulse.events.manager.broadcast") as mock_bc:
             client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
 
         calls = [c.args[0] for c in mock_bc.call_args_list]
@@ -189,7 +189,7 @@ class TestStatuslineSessionDiscovery:
                 "tool_name": "Bash",
             },
         )
-        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+        with patch("agentpulse.events.manager.broadcast") as mock_bc:
             client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
 
         calls = [c.args[0] for c in mock_bc.call_args_list]
@@ -242,7 +242,7 @@ class TestStatuslineSessionDiscovery:
         assert row["ended_at"] is not None
         assert row["pid_alive"] == 0
 
-        with patch("agentpulse.platforms.claude.hooks.manager.broadcast") as mock_bc:
+        with patch("agentpulse.events.manager.broadcast") as mock_bc:
             client.post("/statusline/claude", json=_SAMPLE_STATUSLINE)
 
         row = run_async(schema.get_session(db, session_id="s1"))

@@ -183,6 +183,8 @@ async def clear_session(session_id: str) -> dict:
     Resets last_event/last_tool/last_event_at, ends all active agents,
     and writes a synthetic clear_state marker event.
     """
+    from agentpulse.events import broadcast_session_cleared
+
     db = await get_db()
     row = await schema.get_session(db, session_id=session_id)
     if row is None:
@@ -201,19 +203,10 @@ async def clear_session(session_id: str) -> dict:
         raw_payload="{}",
     )
 
-    from agentpulse.websocket import manager
-
-    await manager.broadcast(
-        {
-            "type": "session_cleared",
-            "platform": "claude",
-            "session_id": session_id,
-            "event_name": "clear_state",
-            "tool_name": None,
-            "agent_id": None,
-            "cwd": row.get("cwd"),
-            "timestamp": cleared_at,
-        }
+    await broadcast_session_cleared(
+        session_id=session_id,
+        cwd=row.get("cwd"),
+        timestamp=cleared_at,
     )
 
     return {"status": "cleared", "session_id": session_id}

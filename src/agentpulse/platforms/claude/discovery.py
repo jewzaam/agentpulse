@@ -8,8 +8,8 @@ import time
 import aiosqlite
 import psutil
 
+from agentpulse.events import broadcast_session_ended
 from agentpulse.platforms.claude import schema
-from agentpulse.websocket import manager
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +95,8 @@ async def run_discovery_tick(
             await schema.update_session_pid_alive(db, session_id=sid, pid_alive=False)
             ended_at = time.time()
             await schema.end_session(db, session_id=sid, ended_at=ended_at)
-            await manager.broadcast(
-                {
-                    "type": "session_ended",
-                    "platform": "claude",
-                    "session_id": sid,
-                    "event_name": None,
-                    "tool_name": None,
-                    "agent_id": None,
-                    "cwd": row.get("cwd"),
-                    "timestamp": ended_at,
-                }
+            await broadcast_session_ended(
+                session_id=sid,
+                cwd=row.get("cwd"),
+                timestamp=ended_at,
             )
