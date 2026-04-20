@@ -2,10 +2,13 @@
 """Configuration, paths, and defaults for AgentPulse."""
 
 import json
+import logging
 import platform
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
@@ -44,7 +47,9 @@ class Settings:
                 raw = json.loads(resolved.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     data = raw
-            except (json.JSONDecodeError, OSError):
+            except json.JSONDecodeError:
+                logger.warning("Malformed config file: %s", resolved)
+            except OSError:
                 pass
 
         db_path_str = data.get("db_path")
