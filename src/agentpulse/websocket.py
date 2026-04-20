@@ -41,7 +41,7 @@ class ConnectionManager:
         payload = json.dumps(message)
         msg_type = message.get("type", "?")
 
-        for ws in self._connections:
+        for ws in list(self._connections):
             try:
                 await ws.send_text(payload)
             except Exception:
