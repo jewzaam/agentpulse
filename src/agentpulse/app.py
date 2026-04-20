@@ -69,7 +69,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.discovery_interval_seconds,
         settings.fetch_limits,
     )
-    db = await init_db(db_path=settings.db_path)
+    try:
+        db = await init_db(db_path=settings.db_path)
+    except Exception:
+        logger.exception("Failed to initialize database at %s", settings.db_path)
+        raise
 
     discovery_task = asyncio.create_task(
         _discovery_loop(db, interval=settings.discovery_interval_seconds)
