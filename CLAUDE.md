@@ -4,16 +4,30 @@ Backend service that collects Claude Code agent state and exposes it via REST + 
 
 ## Commands
 
+Targets follow **verb‑[qualifier‑]noun**. The root Makefile holds standard
+targets (`help`, `check`, `clean`, `format`, `install*`, `uninstall*`, `run`)
+plus project-mutated composites (`install`, `uninstall`, `run`). Subsystem
+targets live in noun-named fragments: `make/hooks.mk`, `make/service.mk`,
+`make/tray.mk`. The standard `test-*` collection lives in `make/test.mk`.
+Run `make help` for the full sorted list.
+
 ```bash
-make check          # Run format-check, lint, typecheck, test, coverage (default)
-make test           # Run pytest
-make coverage       # Run pytest with 80% coverage threshold
-make lint           # Lint with flake8
-make typecheck      # Type check with mypy
-make format         # Format with black
-make run            # Start the service (config in ~/.claude/agentpulse/config.json)
-make install-hooks  # Install hook relay + auto-merge hooks into settings.json
-make pipx           # Install globally via pipx
+make check                       # Full quality gate (default)
+make format                      # Rewrite sources with black
+make test-unit                   # Run pytest only
+
+make install                     # Install everything: pipx + hooks + service autostart
+make uninstall                   # Inverse of install (also tears down tray autostart)
+make install-dev                 # Editable venv install + dev + tray extras
+make install-pipx                # Install globally via pipx (component of `install`)
+
+make run                         # Run service + tray in foreground (Ctrl-C exits both)
+make run-service                 # Service only
+make run-tray                    # Tray only
+
+make install-hooks               # Component: Claude Code hooks
+make install-autostart-service   # Component: service auto-start on login
+make install-autostart-tray      # Component: tray auto-start (opt-in; not part of `make install`)
 ```
 
 ## Configuration

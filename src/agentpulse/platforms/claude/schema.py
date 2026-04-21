@@ -595,6 +595,61 @@ async def insert_statusline(
     await db.commit()
 
 
+async def get_prior_costs_by_session_ids(
+    db: aiosqlite.Connection,
+    *,
+    session_ids: list[str],
+    before_ts: float,
+) -> dict[str, float]:
+    """Return max cumulative cost_usd per session from statusline rows
+    recorded strictly before `before_ts`.
+
+    Sessions with no qualifying rows are absent from the returned dict;
+    callers should default to 0.0.
+    """
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" for _ in session_ids)
+    cursor = await db.execute(
+        f"""
+        SELECT session_id, MAX(cost_usd) AS prior_cost
+        FROM claude_statusline
+        WHERE session_id IN ({placeholders})
+          AND received_at < ?
+          AND cost_usd IS NOT NULL
+        GROUP BY session_id
+        """,
+        [*session_ids, before_ts],
+    )
+    rows = await cursor.fetchall()
+    return {row["session_id"]: row["prior_cost"] for row in rows}
+
+
+async def get_prior_cost(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    before_ts: float,
+) -> float:
+    """Return max cumulative cost_usd for a single session before `before_ts`.
+    Returns 0.0 if no qualifying rows exist.
+    """
+    cursor = await db.execute(
+        """
+        SELECT MAX(cost_usd) AS prior_cost
+        FROM claude_statusline
+        WHERE session_id = ?
+          AND received_at < ?
+          AND cost_usd IS NOT NULL
+        """,
+        (session_id, before_ts),
+    )
+    row = await cursor.fetchone()
+    if row is None or row["prior_cost"] is None:
+        return 0.0
+    return float(row["prior_cost"])
+
+
 async def update_session_statusline(
     db: aiosqlite.Connection,
     *,

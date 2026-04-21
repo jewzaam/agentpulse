@@ -102,9 +102,10 @@ def install_hooks(
         logger.info("relay script installed to %s", dest_relay)
 
         # Copy default config (only if not present)
+        from agentpulse.bootstrap import ensure_config
+
         config_dest = INSTALL_BASE / "config.json"
-        if not config_dest.exists():
-            shutil.copy2(CONFIG_EXAMPLE, config_dest)
+        if ensure_config(target=config_dest, example=CONFIG_EXAMPLE):
             logger.info("default config installed to %s", config_dest)
         else:
             logger.info("config already exists at %s (not overwritten)", config_dest)

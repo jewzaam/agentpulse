@@ -22,6 +22,7 @@ from agentpulse.platforms.claude.models import (
     derive_state,
 )
 from agentpulse.platforms.claude import schema
+from agentpulse.timeutil import local_midnight_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def _session_to_response(
     *,
     agent_count: int = 0,
     agent_states: list[str | None] | None = None,
+    prior_cost_usd: float = 0.0,
 ) -> SessionResponse:
     """Convert a claude_sessions row to a normalized SessionResponse."""
     session_state = derive_state(
@@ -55,6 +57,7 @@ def _session_to_response(
         branch=row.get("branch", ""),
         source_system=row.get("source_system", ""),
         cost_usd=row.get("cost_usd"),
+        prior_cost_usd=prior_cost_usd,
         context_used_pct=row.get("context_used_pct"),
         model_name=row.get("model_name"),
         total_input_tokens=row.get("total_input_tokens"),
@@ -99,6 +102,10 @@ async def list_sessions(
     agents_by_session = await schema.get_agents_by_session_ids(
         db, session_ids=session_ids
     )
+    midnight_ts = local_midnight_epoch()
+    prior_costs = await schema.get_prior_costs_by_session_ids(
+        db, session_ids=session_ids, before_ts=midnight_ts
+    )
 
     results: list[SessionResponse] = []
     for row in rows:
@@ -117,6 +124,7 @@ async def list_sessions(
                 row,
                 agent_count=len(active_agents),
                 agent_states=agent_states,
+                prior_cost_usd=float(prior_costs.get(row["session_id"], 0.0)),
             )
         )
     return results
@@ -148,6 +156,9 @@ async def get_session(session_id: str) -> SessionDetailResponse:
     effective = compute_effective_state(session_state, agent_states)
 
     agent_responses = [_agent_to_response(a) for a in agents]
+    prior_cost = await schema.get_prior_cost(
+        db, session_id=session_id, before_ts=local_midnight_epoch()
+    )
 
     return SessionDetailResponse(
         session_id=row["session_id"],
@@ -164,6 +175,7 @@ async def get_session(session_id: str) -> SessionDetailResponse:
         branch=row.get("branch", ""),
         source_system=row.get("source_system", ""),
         cost_usd=row.get("cost_usd"),
+        prior_cost_usd=prior_cost,
         context_used_pct=row.get("context_used_pct"),
         model_name=row.get("model_name"),
         total_input_tokens=row.get("total_input_tokens"),

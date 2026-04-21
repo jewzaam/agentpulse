@@ -115,6 +115,7 @@ class TestBroadcastStatuslineUpdate:
         await broadcast_statusline_update(
             session_id="s1",
             cost_usd=0.05,
+            prior_cost_usd=0.02,
             context_used_pct=42.0,
             model_name="Sonnet",
             total_input_tokens=1000,
@@ -126,6 +127,7 @@ class TestBroadcastStatuslineUpdate:
         msg = mock_broadcast.call_args[0][0]
         assert msg["type"] == "statusline_update"
         assert msg["cost_usd"] == 0.05
+        assert msg["prior_cost_usd"] == 0.02
         assert msg["model_name"] == "Sonnet"
         assert msg["total_input_tokens"] == 1000
 

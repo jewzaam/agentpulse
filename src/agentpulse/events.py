@@ -157,6 +157,7 @@ async def broadcast_agent_stopped(
 async def broadcast_statusline_update(
     session_id: str,
     cost_usd: float | None,
+    prior_cost_usd: float,
     context_used_pct: float | None,
     model_name: str | None,
     total_input_tokens: int | None,
@@ -173,6 +174,7 @@ async def broadcast_statusline_update(
             "platform": "claude",
             "session_id": session_id,
             "cost_usd": cost_usd,
+            "prior_cost_usd": prior_cost_usd,
             "context_used_pct": context_used_pct,
             "model_name": model_name,
             "total_input_tokens": total_input_tokens,

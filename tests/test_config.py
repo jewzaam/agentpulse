@@ -7,10 +7,7 @@ from pathlib import Path
 import pytest
 
 from agentpulse.config import (
-    DEFAULT_DISCOVERY_INTERVAL_SECONDS,
     DEFAULT_HOST,
-    DEFAULT_LOG_LEVEL,
-    DEFAULT_PORT,
     Settings,
     get_settings,
     reset_settings,
@@ -19,14 +16,9 @@ from agentpulse.config import (
 
 
 class TestSettings:
-    def test_defaults_when_file_missing(self) -> None:
-        settings = Settings.from_config(config_path=Path("/nonexistent"))
-        assert settings.host == DEFAULT_HOST
-        assert settings.port == DEFAULT_PORT
-        assert settings.log_level == DEFAULT_LOG_LEVEL
-        assert settings.discovery_interval_seconds == (
-            DEFAULT_DISCOVERY_INTERVAL_SECONDS
-        )
+    def test_raises_when_file_missing(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            Settings.from_config(config_path=Path("/nonexistent"))
 
     def test_from_config_file(self, tmp_path: Path) -> None:
         config = tmp_path / "config.json"

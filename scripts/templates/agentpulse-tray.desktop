@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AgentPulse Tray
+Comment=System tray icon for AgentPulse
+Exec=%h/.local/bin/agentpulse-tray --config %h/.claude/agentpulse/config.json
+X-GNOME-Autostart-enabled=true
+Terminal=false

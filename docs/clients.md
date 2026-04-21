@@ -158,6 +158,7 @@ Fired when statusline data arrives from Claude Code (cost, tokens, context windo
   "platform": "claude",
   "session_id": "uuid",
   "cost_usd": 5.25,
+  "prior_cost_usd": 1.10,
   "context_used_pct": 25,
   "model_name": "Opus 4.6 (1M context)",
   "total_input_tokens": 10000,
@@ -169,6 +170,8 @@ Fired when statusline data arrives from Claude Code (cost, tokens, context windo
 ```
 
 **Client action:** Update the session's cost, context, model, and token displays. This is a full snapshot — replace, don't accumulate.
+
+`cost_usd` is the session's lifetime cumulative cost. `prior_cost_usd` is the portion accrued before today's local midnight (server TZ). Today's cost = `cost_usd - prior_cost_usd`. `prior_cost_usd` is `0.0` for sessions that started today or have no statusline rows. The same field is present on every REST session response (`/api/v1/sessions`, `/api/v1/sessions/{id}`).
 
 ### limits_updated
 
