@@ -30,6 +30,13 @@ def _configure_logging(*, log_file: Path, log_level: str) -> None:
 
 def main() -> None:
     """Start the AgentPulse service."""
+    import sys
+
+    if len(sys.argv) >= 2 and sys.argv[1] == "init":
+        from agentpulse.cli_init import init_main
+
+        sys.exit(init_main(argv=sys.argv[2:]))
+
     import uvicorn
 
     from agentpulse.config import get_settings, set_config_path
@@ -44,7 +51,12 @@ def main() -> None:
     args = parser.parse_args()
 
     set_config_path(config_path=args.config)
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print("run: agentpulse init", file=sys.stderr)
+        sys.exit(1)
 
     _configure_logging(log_file=settings.log_file, log_level=settings.log_level)
 

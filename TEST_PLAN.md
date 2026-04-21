@@ -82,9 +82,8 @@ All bug fixes to existing functionality **must** follow TDD:
 ## Running Tests
 
 ```bash
-make test           # Run all tests
-make coverage       # Run with coverage (80% threshold)
-make test-verbose   # Run with verbose output
+make test-unit       # Run all tests
+make test-coverage   # Run with coverage (80% threshold)
 ```
 
 ## Test Data

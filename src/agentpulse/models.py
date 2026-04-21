@@ -21,6 +21,7 @@ class SessionResponse(BaseModel):
     branch: str = ""
     source_system: str = ""
     cost_usd: float | None = None
+    prior_cost_usd: float = 0.0
     context_used_pct: float | None = None
     model_name: str | None = None
     total_input_tokens: int | None = None
@@ -63,6 +64,7 @@ class SessionDetailResponse(BaseModel):
     branch: str = ""
     source_system: str = ""
     cost_usd: float | None = None
+    prior_cost_usd: float = 0.0
     context_used_pct: float | None = None
     model_name: str | None = None
     total_input_tokens: int | None = None

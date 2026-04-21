@@ -18,6 +18,7 @@ from agentpulse.events import (
 from agentpulse.platforms.claude.discovery import detect_entrypoint
 from agentpulse.platforms.claude.models import ClaudeHookPayload
 from agentpulse.platforms.claude import schema
+from agentpulse.timeutil import local_midnight_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -278,9 +279,14 @@ async def receive_statusline(body: dict) -> dict:
         model_name or "?",
     )
 
+    prior_cost_usd = await schema.get_prior_cost(
+        db, session_id=session_id, before_ts=local_midnight_epoch()
+    )
+
     await broadcast_statusline_update(
         session_id=session_id,
         cost_usd=cost_usd,
+        prior_cost_usd=prior_cost_usd,
         context_used_pct=context_used_pct,
         model_name=model_name,
         total_input_tokens=total_input_tokens,

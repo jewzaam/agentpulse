@@ -39,18 +39,22 @@ class Settings:
 
     @classmethod
     def from_config(cls, *, config_path: Path) -> "Settings":
-        """Load settings from a JSON config file."""
+        """Load settings from a JSON config file.
+
+        Raises FileNotFoundError if the file does not exist.
+        """
         data: dict = {}
         resolved = config_path.expanduser()
-        if resolved.exists():
-            try:
-                raw = json.loads(resolved.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    data = raw
-            except json.JSONDecodeError:
-                logger.warning("Malformed config file: %s", resolved)
-            except OSError:
-                pass
+        if not resolved.exists():
+            raise FileNotFoundError(f"config not found: {resolved}")
+        try:
+            raw = json.loads(resolved.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+        except json.JSONDecodeError:
+            logger.warning("Malformed config file: %s", resolved)
+        except OSError:
+            pass
 
         db_path_str = data.get("db_path")
         db_path = Path(db_path_str).expanduser() if db_path_str else DEFAULT_DB_PATH
