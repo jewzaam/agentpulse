@@ -10,6 +10,7 @@ import aiosqlite
 from fastapi import FastAPI
 
 from agentpulse import __version__
+from agentpulse import pidfile
 from agentpulse.api.claude import router as claude_api_router
 from agentpulse.api.sessions import router as sessions_router
 from agentpulse.config import get_settings
@@ -17,6 +18,8 @@ from agentpulse.db import close_db, init_db
 from agentpulse.platforms.claude.discovery import run_discovery_tick
 from agentpulse.platforms.claude.hooks import router as hooks_router
 from agentpulse.websocket import router as ws_router
+
+SERVICE_PIDFILE_NAME = "agentpulse"
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("Failed to initialize database at %s", settings.db_path)
         raise
 
+    pidfile.write_pid(SERVICE_PIDFILE_NAME)
+    logger.info("wrote pidfile %s", pidfile.pidfile_path(SERVICE_PIDFILE_NAME))
+
     discovery_task = asyncio.create_task(
         _discovery_loop(db, interval=settings.discovery_interval_seconds)
     )
@@ -82,15 +88,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "discovery loop started interval=%ds", settings.discovery_interval_seconds
     )
 
-    yield
-
-    logger.info("shutting down")
-    discovery_task.cancel()
     try:
-        await asyncio.wait_for(asyncio.shield(discovery_task), timeout=3.0)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        pass
-    await close_db()
+        yield
+    finally:
+        logger.info("shutting down")
+        discovery_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(discovery_task), timeout=3.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        await close_db()
+        pidfile.remove_pid(SERVICE_PIDFILE_NAME)
 
 
 def create_app() -> FastAPI:

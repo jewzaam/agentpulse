@@ -14,9 +14,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from agentpulse import winutil  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = PROJECT_ROOT / "scripts" / "templates"
 
 LINUX_DESKTOP_NAME = "agentpulse-tray.desktop"
@@ -53,9 +57,7 @@ def _windows_startup_dir() -> Path:
 
 
 def _install_windows() -> int:
-    exe = shutil.which("agentpulse-tray") or str(
-        Path.home() / ".local" / "bin" / "agentpulse-tray.exe"
-    )
+    exe = winutil.pythonw_path()
     config = Path.home() / ".claude" / "agentpulse" / "config.json"
     startup = _windows_startup_dir()
     startup.mkdir(parents=True, exist_ok=True)
@@ -64,7 +66,7 @@ def _install_windows() -> int:
     ps_script = (
         f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}'); "
         f"$s.TargetPath = '{exe}'; "
-        f"$s.Arguments = '--config \"{config}\"'; "
+        f"$s.Arguments = '-m agentpulse.tray --config \"{config}\"'; "
         f"$s.WorkingDirectory = '{Path.home()}'; "
         f"$s.Save()"
     )

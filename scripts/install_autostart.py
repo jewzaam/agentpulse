@@ -14,9 +14,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Make the src/ layout importable when running this script directly
+# (pipx-installed users get it via the package; dev-venv users need the path).
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from agentpulse import winutil  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = PROJECT_ROOT / "scripts" / "templates"
 
 # Linux
@@ -63,9 +69,11 @@ def _windows_startup_dir() -> Path:
 
 
 def _install_windows() -> int:
-    exe = shutil.which("agentpulse") or str(
-        Path.home() / ".local" / "bin" / "agentpulse.exe"
-    )
+    # pythonw.exe launches the service without attaching a console
+    # window at login. Using -m agentpulse lets the same Python
+    # environment that ran the installer run the service on startup,
+    # which works for pipx, dev venv, and other install layouts.
+    exe = winutil.pythonw_path()
     config = Path.home() / ".claude" / "agentpulse" / "config.json"
     startup = _windows_startup_dir()
     startup.mkdir(parents=True, exist_ok=True)
@@ -74,7 +82,7 @@ def _install_windows() -> int:
     ps_script = (
         f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}'); "
         f"$s.TargetPath = '{exe}'; "
-        f"$s.Arguments = '--config \"{config}\"'; "
+        f"$s.Arguments = '-m agentpulse --config \"{config}\"'; "
         f"$s.WorkingDirectory = '{Path.home()}'; "
         f"$s.Save()"
     )
