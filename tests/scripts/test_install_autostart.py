@@ -82,7 +82,7 @@ def test_windows_install_creates_shortcut(
     monkeypatch.setitem(os.environ, "APPDATA", str(fake_appdata))
 
     mod = _reload_autostart()
-    monkeypatch.setattr(mod.shutil, "which", lambda _: "C:\\fake\\agentpulse.exe")
+    monkeypatch.setattr(mod.winutil, "pythonw_path", lambda: "C:\\fake\\pythonw.exe")
 
     calls: list[list[str]] = []
 
@@ -114,7 +114,12 @@ def test_windows_install_creates_shortcut(
     assert "powershell" in powershell_cmd.lower()
     assert "WScript.Shell" in powershell_cmd
     assert "AgentPulse.lnk" in powershell_cmd
-    assert "agentpulse.exe" in powershell_cmd
+    # Regression: the shortcut must target pythonw.exe with -m agentpulse,
+    # NOT the pipx console shim "agentpulse.exe" (which attaches a
+    # console window on login).
+    assert "pythonw.exe" in powershell_cmd
+    assert "-m agentpulse" in powershell_cmd
+    assert "agentpulse.exe" not in powershell_cmd
 
 
 def test_windows_uninstall_removes_shortcut(

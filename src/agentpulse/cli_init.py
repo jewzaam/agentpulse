@@ -16,7 +16,7 @@ def init_main(*, argv: list[str], example: Path | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentpulse init")
     parser.add_argument(
         "--config",
-        type=Path,
+        type=lambda s: Path(s).expanduser(),
         default=None,
         help="Path to write config.json (default: ~/.claude/agentpulse/config.json)",
     )

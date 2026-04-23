@@ -61,7 +61,7 @@ def test_windows_install_creates_shortcut(
     monkeypatch.setitem(os.environ, "APPDATA", str(fake_appdata))
 
     mod = _reload_mod()
-    monkeypatch.setattr(mod.shutil, "which", lambda _: "C:\\fake\\agentpulse-tray.exe")
+    monkeypatch.setattr(mod.winutil, "pythonw_path", lambda: "C:\\fake\\pythonw.exe")
 
     calls: list[list[str]] = []
 
@@ -89,4 +89,9 @@ def test_windows_install_creates_shortcut(
 
     assert exit_code == 0
     assert any("AgentPulseTray.lnk" in " ".join(c) for c in calls)
-    assert any("agentpulse-tray.exe" in " ".join(c) for c in calls)
+    joined = " ".join(calls[0])
+    # Regression: target pythonw.exe -m agentpulse.tray, not the
+    # pipx console shim.
+    assert "pythonw.exe" in joined
+    assert "-m agentpulse.tray" in joined
+    assert "agentpulse-tray.exe" not in joined

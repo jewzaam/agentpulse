@@ -10,7 +10,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="agentpulse-tray")
     parser.add_argument(
         "--config",
-        type=Path,
+        type=lambda s: Path(s).expanduser(),
         required=True,
         help="Path to config JSON file",
     )

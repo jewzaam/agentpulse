@@ -44,7 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AgentPulse service")
     parser.add_argument(
         "--config",
-        type=Path,
+        type=lambda s: Path(s).expanduser(),
         required=True,
         help="Path to config JSON file",
     )
