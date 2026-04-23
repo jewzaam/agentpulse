@@ -41,4 +41,4 @@ class TrayState:
     def tooltip(self) -> str:
         with self._lock:
             status = "Running" if self.connected else "Stopped"
-            return f"AgentPulse — {status} — {self.active_sessions} active"
+            return f"AgentPulse - {status} - {self.active_sessions} active"

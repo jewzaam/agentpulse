@@ -192,8 +192,14 @@ async def upsert_session(
                 WHEN excluded.source_system != '' THEN excluded.source_system
                 ELSE source_system
             END,
-            pid_alive = 1,
-            ended_at = NULL
+            pid_alive = CASE
+                WHEN excluded.last_event = 'SessionEnd' THEN pid_alive
+                ELSE 1
+            END,
+            ended_at = CASE
+                WHEN excluded.last_event = 'SessionEnd' THEN ended_at
+                ELSE NULL
+            END
         """,
         (
             session_id,

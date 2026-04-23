@@ -79,4 +79,4 @@ def test_status_label_stopped() -> None:
 
 def test_tooltip() -> None:
     s = TrayState(connected=True, active_sessions=1)
-    assert s.tooltip() == "AgentPulse — Running — 1 active"
+    assert s.tooltip() == "AgentPulse - Running - 1 active"

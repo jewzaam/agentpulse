@@ -116,6 +116,36 @@ class TestReceiveHook:
         row = run_async(schema.get_session(db, session_id="s1"))
         assert row["ended_at"] is not None
 
+    def test_statusline_after_session_end_preserves_ended_at(self, client, db) -> None:
+        """A statusline arriving after SessionEnd must not revive the session."""
+        client.post(
+            "/hooks/claude",
+            json={
+                "session_id": "s1",
+                "hook_event_name": "PreToolUse",
+            },
+        )
+        client.post(
+            "/hooks/claude",
+            json={
+                "session_id": "s1",
+                "hook_event_name": "SessionEnd",
+            },
+        )
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["ended_at"] is not None
+
+        client.post(
+            "/statusline/claude",
+            json={
+                "session_id": "s1",
+                "cost": {"total_cost_usd": 0.05},
+            },
+        )
+        row = run_async(schema.get_session(db, session_id="s1"))
+        assert row["ended_at"] is not None
+        assert row["last_event"] == "SessionEnd"
+
     def test_events_appended_to_log(self, client, db) -> None:
         client.post(
             "/hooks/claude",
