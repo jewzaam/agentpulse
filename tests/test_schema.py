@@ -213,6 +213,34 @@ class TestSessionCrud:
         assert row["pid_alive"] == 1
         assert row["ended_at"] is None
 
+    async def test_upsert_session_end_does_not_revive(self, db) -> None:
+        """A SessionEnd upsert must not clear ended_at or set pid_alive=1."""
+        await schema.upsert_session(db, session_id="s1", pid=1, cwd="/tmp/proj")
+        await schema.end_session(db, session_id="s1", ended_at=99.0)
+        await schema.update_session_pid_alive(db, session_id="s1", pid_alive=False)
+
+        await schema.upsert_session(
+            db,
+            session_id="s1",
+            last_event="SessionEnd",
+            last_event_at=100.0,
+        )
+        row = await schema.get_session(db, session_id="s1")
+        assert row["ended_at"] == 99.0
+        assert row["pid_alive"] == 0
+
+    async def test_upsert_without_event_revives(self, db) -> None:
+        """An upsert with no last_event (e.g. statusline) can revive a session
+        that ended via PID death. The statusline handler guards against
+        reviving SessionEnd sessions separately."""
+        await schema.upsert_session(db, session_id="s1", pid=1, cwd="/tmp/proj")
+        await schema.end_session(db, session_id="s1", ended_at=99.0)
+
+        await schema.upsert_session(db, session_id="s1", cwd="/tmp/proj")
+        row = await schema.get_session(db, session_id="s1")
+        assert row["ended_at"] is None
+        assert row["pid_alive"] == 1
+
     async def test_source_system(self, db) -> None:
         await schema.upsert_session(
             db,

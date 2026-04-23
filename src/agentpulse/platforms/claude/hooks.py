@@ -79,8 +79,12 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
 
     existing = await schema.get_session(db, session_id=payload.session_id)
     is_new = existing is None
-    is_resumed = existing is not None and (
-        existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+    is_resumed = (
+        existing is not None
+        and event != "SessionEnd"
+        and (
+            existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+        )
     )
 
     entrypoint = await asyncio.to_thread(detect_entrypoint, pid=payload.pid)
@@ -180,8 +184,12 @@ async def receive_statusline(body: dict) -> dict:
 
     existing = await schema.get_session(db, session_id=session_id)
     is_new = existing is None
-    is_resumed = existing is not None and (
-        existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+    is_resumed = (
+        existing is not None
+        and existing.get("last_event") != "SessionEnd"
+        and (
+            existing.get("ended_at") is not None or not existing.get("pid_alive", True)
+        )
     )
 
     if is_new or is_resumed:
