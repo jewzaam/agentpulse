@@ -28,10 +28,9 @@ def test_service_main_exits_with_helpful_message(
     config.reset_settings()
     monkeypatch.setattr("sys.argv", ["agentpulse", "--config", str(missing)])
 
-    with pytest.raises(SystemExit) as exc:
-        entry.main()
+    rc = entry.main()
 
-    assert exc.value.code == 1
+    assert rc == entry.EXIT_ERROR
     captured = capsys.readouterr()
     err = captured.err + captured.out
     assert "config not found" in err.lower()

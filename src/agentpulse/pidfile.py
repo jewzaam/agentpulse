@@ -21,7 +21,7 @@ def pidfile_path(name: str) -> Path:
     return _BASE_DIR / f"{name}.pid"
 
 
-def write_pid(name: str, pid: int | None = None) -> Path:
+def write_pid(name: str, *, pid: int | None = None) -> Path:
     """Write `pid` (or os.getpid()) to the named pidfile. Creates dir if needed."""
     path = pidfile_path(name)
     path.parent.mkdir(parents=True, exist_ok=True)

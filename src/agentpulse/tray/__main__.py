@@ -5,8 +5,11 @@ import argparse
 import sys
 from pathlib import Path
 
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
 
-def main() -> None:
+
+def main() -> int:
     parser = argparse.ArgumentParser(prog="agentpulse-tray")
     parser.add_argument(
         "--config",
@@ -19,12 +22,14 @@ def main() -> None:
     try:
         from agentpulse.tray.app import run
 
-        sys.exit(run(config_path=args.config))
+        rc = run(config_path=args.config)
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         print("run: agentpulse init", file=sys.stderr)
-        sys.exit(1)
+        return EXIT_ERROR
+
+    return EXIT_SUCCESS if rc in (None, 0, EXIT_SUCCESS) else EXIT_ERROR
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

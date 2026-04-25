@@ -11,6 +11,7 @@ Deep merge strategy (matching ~/source/my-claude-stuff/scripts/reconcile.py):
 Zero dependencies — stdlib only.
 """
 
+import argparse
 import json
 import logging
 import shutil
@@ -134,7 +135,17 @@ def install_hooks(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="install_hooks",
+        description="Install AgentPulse hooks into ~/.claude/settings.json.",
+    )
+    parser.add_argument(
+        "--dryrun",
+        action="store_true",
+        help="show planned changes without writing",
+    )
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    dry_run = "--dryrun" in sys.argv or "--dry-run" in sys.argv
-    success = install_hooks(dry_run=dry_run)
+    success = install_hooks(dry_run=args.dryrun)
     sys.exit(0 if success else 1)
