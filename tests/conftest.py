@@ -98,7 +98,9 @@ def _isolate_config(tmp_path: Path) -> None:
 def run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run an async coroutine from a sync test context.
 
-    Uses asyncio.get_event_loop().run_until_complete() — the standard
-    pattern for sync TestClient tests that need to call async DB helpers.
+    Uses asyncio.run() — the modern replacement for the deprecated
+    asyncio.get_event_loop().run_until_complete() pattern. asyncio.run()
+    creates a fresh event loop per call, which is fine for the sync
+    TestClient tests this helper serves.
     """
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)

@@ -47,9 +47,16 @@ def _get_url(config: dict) -> str:
 
 
 def _configure_logging(*, debug: bool) -> None:
-    """Set up logging. In debug mode, also log raw payloads to a JSONL file."""
+    """Set up logging. In debug mode, also log raw payloads to a JSONL file.
+
+    Stderr uses the standard format (asctime/levelname/name/message). The
+    rotating file handler keeps a raw `%(message)s` formatter so the log
+    file remains JSONL-parseable — payloads written there are already JSON.
+    """
     logging.basicConfig(
-        level=logging.WARNING, format="%(message)s", stream=sys.stderr
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stderr,
     )
     if debug:
         logger.setLevel(logging.DEBUG)

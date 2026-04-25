@@ -103,8 +103,8 @@ has `type`, `platform`, and `timestamp`. Most have `session_id`.
 **Client pattern:** Bootstrap via `GET /api/v1/sessions` on connect, then apply WebSocket
 updates incrementally by switching on `message.type`.
 
-**Full client guide:** [docs/clients.md](docs/clients.md) — all message types, shapes, REST
-endpoints, derived state mapping, and client implementation notes.
+**Full client guide:** [docs/design/clients.md](docs/design/clients.md) — all message types,
+shapes, REST endpoints, derived state mapping, and client implementation notes.
 
 **Ping/pong:** AgentPulse does NOT send WebSocket pings. Clients that expect server-initiated
 pings will timeout and disconnect. Configure the client to either disable ping expectations
