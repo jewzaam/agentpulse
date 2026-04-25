@@ -1,6 +1,6 @@
 # agentpulse
 
-[![test-unit](https://github.com/jewzaam/agentpulse/actions/workflows/test-unit.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test-unit.yml) [![test-coverage](https://github.com/jewzaam/agentpulse/actions/workflows/test-coverage.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test-coverage.yml) [![test-lint](https://github.com/jewzaam/agentpulse/actions/workflows/test-lint.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test-lint.yml) [![test-format](https://github.com/jewzaam/agentpulse/actions/workflows/test-format.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test-format.yml) [![test-typecheck](https://github.com/jewzaam/agentpulse/actions/workflows/test-typecheck.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test-typecheck.yml)
+[![test](https://github.com/jewzaam/agentpulse/actions/workflows/test.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/test.yml) [![quality](https://github.com/jewzaam/agentpulse/actions/workflows/quality.yml/badge.svg)](https://github.com/jewzaam/agentpulse/actions/workflows/quality.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 A backend service that collects agent state from Claude Code sessions and exposes it for querying via REST and WebSocket.
@@ -135,6 +135,18 @@ All configuration is via the config file (`--config` is required). See `config.e
 | `GET /api/v1/claude/sessions` | Raw Claude session data |
 | `GET /api/v1/claude/events` | Raw Claude events with filters |
 | `ws://host:port/ws` | Real-time event stream |
+
+## Documentation
+
+- [Client guide (v2)](docs/design/clients.md) — connecting, bootstrap, message handling
+- [REST API design](docs/design/api.md) — `/api/v2/` resources and response shapes
+- [WebSocket protocol](docs/design/websocket.md) — frame types and dispatch
+- [Database design](docs/design/database.md) — append-only log model
+- [Producer/consumer flows](docs/design/ux.md) — system overview
+- [Hook payload reference](docs/reference/hooks-payload.md), [statusline payload reference](docs/reference/statusline-payload.md)
+- [Claude Code runtime](docs/reference/claude-runtime.md), [state transitions](docs/reference/state-transitions.md)
+- [v1 docs](docs/old/) — frozen reference for the current `/api/v1/` surface
+- [Test plan](TEST_PLAN.md)
 
 ## Development
 

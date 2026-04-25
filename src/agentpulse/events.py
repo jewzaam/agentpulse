@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 async def broadcast_session_discovered(
     session_id: str,
+    *,
     cwd: str | None,
     timestamp: float,
 ) -> None:
@@ -35,6 +36,7 @@ async def broadcast_session_discovered(
 
 async def broadcast_session_ended(
     session_id: str,
+    *,
     cwd: str | None,
     timestamp: float,
 ) -> None:
@@ -56,6 +58,7 @@ async def broadcast_session_ended(
 
 async def broadcast_session_cleared(
     session_id: str,
+    *,
     cwd: str | None,
     timestamp: float,
 ) -> None:
@@ -78,6 +81,7 @@ async def broadcast_session_cleared(
 async def broadcast_hook_event(
     session_id: str,
     event_name: str,
+    *,
     tool_name: str | None,
     agent_id: str | None,
     cwd: str | None,
@@ -113,6 +117,7 @@ async def broadcast_hook_event(
 async def broadcast_agent_started(
     session_id: str,
     agent_id: str,
+    *,
     cwd: str | None,
     timestamp: float,
 ) -> None:
@@ -135,6 +140,7 @@ async def broadcast_agent_started(
 async def broadcast_agent_stopped(
     session_id: str,
     agent_id: str,
+    *,
     cwd: str | None,
     timestamp: float,
 ) -> None:
@@ -156,6 +162,7 @@ async def broadcast_agent_stopped(
 
 async def broadcast_statusline_update(
     session_id: str,
+    *,
     cost_usd: float | None,
     prior_cost_usd: float,
     context_used_pct: float | None,
@@ -188,6 +195,7 @@ async def broadcast_statusline_update(
 
 async def broadcast_limits_updated(
     limits: dict,
+    *,
     timestamp: float,
 ) -> None:
     """Broadcast limits_updated event."""
