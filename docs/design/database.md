@@ -65,6 +65,39 @@ If multi-account becomes a real need, the work is coordinated across
 source it at ingestion, and make consumers account-aware. Do not add
 it piecemeal.
 
+### Multi-machine is supported, not deferred
+
+`source_system` (hostname) is a column on every wire-sourced log
+table. Clients running on different machines can write to the same
+agentpulse service over the network, and consumers see a unified
+view across hosts. The same single-account constraint above still
+applies — across machines, the service assumes one Anthropic
+account.
+
+**Server local time is the source of truth** for date-grouped
+derivations like `cost_by_day`. Clients in different timezones see
+buckets keyed by the server's calendar day. Documented here so
+implementers don't try to introduce per-client TZ logic.
+
+### Storage and throughput
+
+Single-user usage profile: ~5k log rows/day. Heavy usage (active
+work + home, multiple concurrent sessions, full statusline cadence):
+~10–15k log rows/day. SQLite WAL handles this comfortably.
+
+Year projections at heavy usage: ~5M rows total across all log
+tables. Still within single-file SQLite's comfort zone; no
+compaction or archival strategy is needed at this scale. Revisit
+if the deployment grows past one or two heavy users on shared
+infrastructure.
+
+### Backup
+
+Append-only logs make snapshots straightforward. A live snapshot
+must use `sqlite3 <db> ".backup <dest>"` or copy all three of
+`.db`, `.db-wal`, `.db-shm`. A bare `cp` of only the `.db` file
+misses uncommitted WAL pages.
+
 ## Audit columns
 
 Every log table carries:
@@ -339,6 +372,60 @@ Notes:
   it can land as an optional `fetched_by_system` column — separate
   concern from account scoping.
 
+## Indexes
+
+Append-only logs are insert-heavy and read-bursty. The index set
+below covers the query patterns the API and watcher hit; everything
+else is `SELECT` over `id` on small result sets and doesn't need
+help.
+
+### `claude_log_hooks`
+
+| Index | Supports |
+|---|---|
+| `(session_id, received_at DESC)` | Latest hook per session (derived state, current pid/cwd lookup); session timeline pagination. |
+| `(pid, source_system, cwd, received_at)` | Process grouping; `MIN(received_at)` for `process_id` derivation; `MAX(received_at)` for last-activity. |
+| `(received_at)` | `?since=T&until=T` time-range scans on `/log/hooks` and process-list queries. |
+| `(agent_id) WHERE agent_id IS NOT NULL` | Agent timeline queries. Partial index — most rows have null `agent_id`, so a full index is wasted bytes. |
+
+### `claude_log_statuslines`
+
+| Index | Supports |
+|---|---|
+| `(session_id, received_at DESC)` | Latest statusline per session (current cost / context / model); session timeline. |
+| `(pid, source_system, cwd, received_at)` | Process-cumulative cost (`MAX(cost_usd)` over the process's window); process grouping. |
+| `(received_at)` | Time-range scans on `/log/statuslines` and `cost_by_day` aggregation. |
+
+### `claude_log_pid_deaths`
+
+| Index | Supports |
+|---|---|
+| `(pid, source_system, cwd)` | "Is this process dead?" lookups during process derivation. The single most-called index in the active-set query path. |
+| `(observed_at)` | Time-range scans on `/log/pid-deaths`. |
+
+### `claude_log_api_limits`
+
+| Index | Supports |
+|---|---|
+| `(received_at)` | Latest fetch and time-range history. |
+
+### Notes
+
+- All ordering with `DESC` is hint-only — SQLite still uses these
+  indexes for ascending scans. The `DESC` is documentation that
+  the hot path is "give me the latest."
+- The `(pid, source_system, cwd, received_at)` indexes on
+  `claude_log_hooks` and `claude_log_statuslines` are the load-
+  bearing ones for process derivation. Don't ship without them.
+- No covering indexes proposed. Row width is small enough that
+  the marginal lookup cost is fine.
+- Composite uniqueness is **not** enforced. Logs are append-only
+  and rows that look identical can occur (e.g. two events at the
+  same `received_at` for the same session). The `id` surrogate is
+  the only unique key.
+- WAL checkpointing is automatic; no manual `VACUUM` planned.
+  Revisit if file growth or query latency becomes an issue.
+
 ## Derived concepts
 
 None of the following are stored. They are the domain concepts the logs
@@ -389,6 +476,46 @@ Process identity:
 Cumulative cost for a process = the max `cost_usd` observed in
 `claude_log_statuslines` within the process's time window (monotonic
 by construction).
+
+### Sessions discovered via statusline only
+
+A session can appear via `claude_log_statuslines` before any
+matching `claude_log_hooks` row exists — statuslines render fast
+and a fresh session can post one before its first hook lands. Such
+a session is **valid and present** in the derived view: it has
+`session_id`, `pid`, `source_system`, `cwd`, `model`, `cost`,
+`context`, `version` from the statusline. What it lacks is
+`event_name` / `tool_name` / `agent_id`, so its `derived_state`
+is `null` (unknown) until a hook arrives. The first hook fills
+in the gap; no special migration is needed.
+
+### Active vs ended
+
+- **Process active.** No `claude_log_pid_deaths` row exists for
+  the process's `(pid, source_system, cwd)` after the process's
+  earliest event. PID alive ⇒ process active, regardless of
+  individual session states.
+- **Session active.** No `SessionEnd` hook in `claude_log_hooks`
+  for `session_id` AND the enclosing process is active. A session
+  with zero hooks (statusline-only) is active.
+- **Agent active.** No `SubagentStop` hook for `agent_id` AND the
+  enclosing session is active.
+
+A session post-`/clear` with no hooks yet is **active** (no
+SessionEnd, process alive). The fact that `derived_state` is null
+for it is a UI concern, not a liveness concern.
+
+### Derived ids — computed on query
+
+`process_id` and `epoch_id` are deterministic hashes of the
+identity composite (see [`api.md`](api.md) for the algorithm).
+They are **computed at query time**, not stored. The same logs
+produce the same ids on every read.
+
+A future `claude_view_processes` materialization may cache them
+if list-query latency becomes a problem. None today; the dashboard
+is driven by WebSocket and only hits the process list at boundary
+moments (bootstrap, new session, day rollover).
 
 ## Future entities
 
