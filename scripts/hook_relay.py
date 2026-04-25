@@ -12,6 +12,7 @@ Uses psutil (if available) to find the Claude Code PID via process
 ancestry. Falls back to os.getppid() if psutil is not installed.
 """
 
+import argparse
 import json
 import logging
 import logging.handlers
@@ -73,30 +74,39 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _parse_config_path() -> Path | None:
-    """Parse --config from sys.argv."""
-    for i, arg in enumerate(sys.argv[1:], 1):
-        if arg == "--config" and i + 1 < len(sys.argv):
-            return Path(sys.argv[i + 1])
-    return None
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="hook_relay",
+        description="Relay Claude Code hook events to AgentPulse.",
+    )
+    parser.add_argument(
+        "--config",
+        type=lambda s: Path(s).expanduser(),
+        required=True,
+        help="path to config JSON file",
+    )
+    parser.add_argument(
+        "--marker",
+        nargs=argparse.REMAINDER,
+        default=None,
+        help="write a marker line to the debug log and exit",
+    )
+    return parser
 
 
 def main() -> None:
-    config_path = _parse_config_path()
+    parser = _build_parser()
+    args = parser.parse_args()
 
-    if config_path is None:
-        print("hook_relay: --config is required", file=sys.stderr)
-        sys.exit(1)
-
-    config = _load_config(config_path)
+    config = _load_config(args.config)
     url = _get_url(config)
     log_level = str(config.get("log_level", "INFO")).upper()
     debug = log_level == "DEBUG"
 
-    # --marker flag: inject a labeled boundary line and exit
-    if len(sys.argv) >= 2 and sys.argv[1] == "--marker":
+    # --marker: inject a labeled boundary line and exit
+    if args.marker is not None:
         _configure_logging(debug=True)
-        marker_text = " ".join(sys.argv[2:]) if len(sys.argv) >= 3 else ""
+        marker_text = " ".join(args.marker)
         logger.debug(json.dumps({"_marker": marker_text, "_ts": _now_iso()}))
         return
 

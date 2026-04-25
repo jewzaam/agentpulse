@@ -59,9 +59,9 @@ class TestServiceMainExpandsTilde:
             patch("agentpulse.config.set_config_path", side_effect=_capture_set),
             patch("agentpulse.config.get_settings", side_effect=_raise_fnf),
         ):
-            with pytest.raises(SystemExit):
-                service_main.main()
+            rc = service_main.main()
 
+        assert rc == service_main.EXIT_ERROR
         assert captured["path"] == Path.home() / "nope.json"
         assert "~" not in str(captured["path"])
 
@@ -83,9 +83,8 @@ class TestTrayMainExpandsTilde:
             return 0
 
         with patch("agentpulse.tray.app.run", side_effect=_capture):
-            with pytest.raises(SystemExit) as exc:
-                tray_main.main()
-            assert exc.value.code == 0
+            rc = tray_main.main()
 
+        assert rc == tray_main.EXIT_SUCCESS
         assert captured["path"] == Path.home() / "tray.json"
         assert "~" not in str(captured["path"])

@@ -7,6 +7,10 @@ PROJECT_NAME ?= $(PACKAGE_NAME)
 SRC_DIR ?= src/$(PACKAGE_NAME)
 CONFIG_FILE ?= ~/.claude/$(PACKAGE_NAME)/config.json
 
+# System Python used to bootstrap the venv. CI passes PY_SYS=python so the
+# actions/setup-python interpreter is used; locally `python3` is the default.
+PY_SYS ?= python3
+
 ifeq ($(OS),Windows_NT)
     VENV_DIR ?= .venv
     PYTHON ?= $(VENV_DIR)/Scripts/python.exe
@@ -32,7 +36,7 @@ help:  ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
 
 $(PYTHON):
-	python3 -m venv $(VENV_DIR)
+	$(PY_SYS) -m venv $(VENV_DIR)
 
 clean:  ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info

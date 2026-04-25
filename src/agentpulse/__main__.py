@@ -4,7 +4,12 @@
 import argparse
 import logging
 import logging.handlers
+import sys
+import types
 from pathlib import Path
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
 
 
 def _configure_logging(*, log_file: Path, log_level: str) -> None:
@@ -15,7 +20,7 @@ def _configure_logging(*, log_file: Path, log_level: str) -> None:
     handler = logging.handlers.RotatingFileHandler(
         log_file,
         maxBytes=2 * 1024 * 1024,
-        backupCount=3,
+        backupCount=1,
         encoding="utf-8",
     )
     handler.setFormatter(
@@ -28,14 +33,33 @@ def _configure_logging(*, log_file: Path, log_level: str) -> None:
     root.addHandler(handler)
 
 
-def main() -> None:
-    """Start the AgentPulse service."""
-    import sys
+def _install_excepthook(*, logger: logging.Logger) -> None:
+    """Route uncaught exceptions through logging instead of detached stderr.
 
+    The service runs as a daemon launched by the tray supervisor with stderr
+    redirected to DEVNULL on Windows, so unhandled exception tracebacks would
+    otherwise be lost. KeyboardInterrupt falls through to the default handler.
+    """
+
+    def _hook(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.critical("uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
+
+    sys.excepthook = _hook
+
+
+def main() -> int:
+    """Start the AgentPulse service."""
     if len(sys.argv) >= 2 and sys.argv[1] == "init":
         from agentpulse.cli_init import init_main
 
-        sys.exit(init_main(argv=sys.argv[2:]))
+        return init_main(argv=sys.argv[2:])
 
     import uvicorn
 
@@ -56,9 +80,10 @@ def main() -> None:
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         print("run: agentpulse init", file=sys.stderr)
-        sys.exit(1)
+        return EXIT_ERROR
 
     _configure_logging(log_file=settings.log_file, log_level=settings.log_level)
+    _install_excepthook(logger=logging.getLogger(__name__))
 
     uvicorn.run(
         "agentpulse.app:create_app",
@@ -67,7 +92,8 @@ def main() -> None:
         port=settings.port,
         log_level=settings.log_level.lower(),
     )
+    return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
