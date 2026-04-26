@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from agentpulse.api.v2 import queries
 from agentpulse.api.v2.models import (
     AgentResponse,
+    ApiLimitsResponse,
     EpochResponse,
     EventResponse,
     PidDeathResponse,
@@ -361,3 +362,36 @@ async def list_log_pid_deaths(
             )
         )
     return out
+
+
+# ---- /log/api-limits --------------------------------------------------------
+
+
+@router.get("/log/api-limits", response_model=list[ApiLimitsResponse])
+async def list_log_api_limits(
+    since: float | None = None,
+    until: float | None = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> list[ApiLimitsResponse]:
+    """Raw read of claude_log_api_limits. Account-scoped — no identity filters.
+
+    since/until bound received_at. raw_response is included by default.
+    """
+    db = await get_db()
+    rows = await queries.get_log_api_limits(
+        db, since=since, until=until, limit=limit, offset=offset
+    )
+    return [
+        ApiLimitsResponse(
+            id=r["id"],
+            received_at=r["received_at"],
+            received_by=r["received_by"],
+            five_hour_utilization=r["five_hour_utilization"],
+            five_hour_resets_at=r["five_hour_resets_at"],
+            seven_day_utilization=r["seven_day_utilization"],
+            seven_day_resets_at=r["seven_day_resets_at"],
+            raw_response=r["raw_response"],
+        )
+        for r in rows
+    ]

@@ -17,6 +17,7 @@ import urllib.request
 import aiosqlite
 
 from agentpulse import config
+from agentpulse.api.v2.events import broadcast_api_limits_logged
 from agentpulse.events import broadcast_limits_updated
 from agentpulse.platforms.claude import schema
 
@@ -182,11 +183,22 @@ async def get_limits(db: aiosqlite.Connection) -> dict | None:
 
     if raw is not None:
         fetched_at = time.time()
+        raw_json = json.dumps(raw)
         await schema.insert_limits(
             db,
             fetched_at=fetched_at,
-            raw_response=json.dumps(raw),
+            raw_response=raw_json,
         )
+
+        # v2 dual-write
+        v2_log_id, v2_fields = await schema.insert_log_api_limits(
+            db,
+            received_at=fetched_at,
+            received_by="limits-fetcher",
+            raw_response=raw_json,
+        )
+        await db.commit()
+
         _consecutive_failures = 0
         _cached_limits_fetched_at = fetched_at
         logger.info("limits fetched and stored")
@@ -197,6 +209,12 @@ async def get_limits(db: aiosqlite.Connection) -> dict | None:
             await broadcast_limits_updated(
                 limits=result,
                 timestamp=fetched_at,
+            )
+            await broadcast_api_limits_logged(
+                log_id=v2_log_id,
+                received_at=fetched_at,
+                received_by="limits-fetcher",
+                **v2_fields,
             )
             return result
 

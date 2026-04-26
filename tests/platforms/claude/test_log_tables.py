@@ -523,13 +523,51 @@ class TestReplayIdempotency:
         await db.commit()
 
         result = await schema.replay_v1_to_v2_logs(db)
-        assert result == {"hooks": 0, "statuslines": 0}
+        assert result["hooks"] == 0  # hooks gate triggered
 
         cursor = await db.execute("SELECT count(*) AS n FROM claude_log_hooks")
         row = await cursor.fetchone()
         assert row["n"] == 1  # only the pre-populated row
 
-    async def test_runs_when_both_tables_empty(self, db) -> None:
-        # Both tables are empty (just initialized); trivial case
+    async def test_runs_when_all_tables_empty(self, db) -> None:
+        # Initialized DB, no v1 source data → all counts zero
         result = await schema.replay_v1_to_v2_logs(db)
-        assert result == {"hooks": 0, "statuslines": 0}  # no v1 rows to replay
+        assert result == {"hooks": 0, "statuslines": 0, "api_limits": 0}
+
+    async def test_per_table_gating_lets_new_table_catch_up(self, db) -> None:
+        """When hooks/statuslines were migrated previously but api_limits
+        is new (slice C), the api_limits replay must still run for users
+        whose v1 claude_limits has historical rows.
+        """
+        # Pre-populate hooks (simulating an earlier slice-A1 migration)
+        await db.execute(
+            "INSERT INTO claude_log_hooks (pid, session_id, event_name, "
+            "received_at) VALUES (?, ?, ?, ?)",
+            (1234, "s1", "PreToolUse", 100.0),
+        )
+        # Add a v1 limits row that should replay
+        await db.execute(
+            "INSERT INTO claude_limits (fetched_at, raw_response) VALUES (?, ?)",
+            (
+                500.0,
+                json.dumps(
+                    {
+                        "five_hour": {
+                            "utilization": 7.0,
+                            "resets_at": "2026-04-13T07:00:00+00:00",
+                        }
+                    }
+                ),
+            ),
+        )
+        await db.commit()
+
+        result = await schema.replay_v1_to_v2_logs(db)
+        assert result["hooks"] == 0  # already populated, skipped
+        assert result["api_limits"] == 1  # new table caught up
+
+        cursor = await db.execute("SELECT * FROM claude_log_api_limits")
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row["five_hour_utilization"] == 7.0
+        assert row["received_by"] == "limits-fetcher-v1-replay"
