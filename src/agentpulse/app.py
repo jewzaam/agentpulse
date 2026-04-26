@@ -14,6 +14,7 @@ from agentpulse import pidfile
 from agentpulse.api.claude import router as claude_api_router
 from agentpulse.api.sessions import router as sessions_router
 from agentpulse.api.v2 import router as v2_router
+from agentpulse.api.v2 import ws_router as v2_ws_router
 from agentpulse.config import get_settings
 from agentpulse.db import close_db, init_db
 from agentpulse.platforms.claude.discovery import run_discovery_tick
@@ -113,5 +114,6 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router)
     app.include_router(claude_api_router)
     app.include_router(v2_router)
+    app.include_router(v2_ws_router)
     app.include_router(ws_router)
     return app

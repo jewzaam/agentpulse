@@ -9,6 +9,11 @@ import time
 import aiosqlite
 from fastapi import APIRouter, Request, Response
 
+from agentpulse.api.v2.events import (
+    broadcast_hook_logged,
+    broadcast_statusline_logged,
+)
+from agentpulse.api.v2.queries import IdEnricher
 from agentpulse.db import get_db
 from agentpulse.events import (
     broadcast_hook_event,
@@ -131,7 +136,7 @@ async def receive_hook(payload: ClaudeHookPayload, request: Request) -> dict:
             wire_payload = json.loads(raw_wire) if raw_wire else {}
         except json.JSONDecodeError:
             wire_payload = {}
-        await schema.insert_log_hook(
+        v2_log_id = await schema.insert_log_hook(
             db,
             payload=wire_payload,
             received_at=received_at,
@@ -177,6 +182,38 @@ async def receive_hook(payload: ClaudeHookPayload, request: Request) -> dict:
         cwd=payload.cwd or None,
         timestamp=received_at,
     )
+
+    if v2_log_id is not None:
+        enricher = IdEnricher(db)
+        process_id = await enricher.process_id(
+            pid=payload.pid,
+            source_system=payload.source_system,
+            cwd=payload.cwd,
+        )
+        epoch_id = await enricher.epoch_id(
+            session_id=payload.session_id,
+            pid=payload.pid,
+            source_system=payload.source_system,
+            cwd=payload.cwd,
+        )
+        await broadcast_hook_logged(
+            log_id=v2_log_id,
+            process_id=process_id,
+            epoch_id=epoch_id,
+            pid=payload.pid,
+            source_system=payload.source_system,
+            cwd=payload.cwd,
+            session_id=payload.session_id,
+            agent_id=payload.agent_id or None,
+            event_name=event,
+            tool_name=payload.tool_name or None,
+            agent_type=payload.agent_type or None,
+            permission_mode=wire_payload.get("permission_mode") or None,
+            entrypoint=entrypoint,
+            claude_version=wire_payload.get("claude_version") or None,
+            received_at=received_at,
+            received_by="hook-endpoint",
+        )
 
     return {"status": "ok"}
 
@@ -294,7 +331,7 @@ async def receive_statusline(body: dict, request: Request) -> dict:
         )
 
         # v2 dual-write
-        await schema.insert_log_statusline(
+        v2_log_id = await schema.insert_log_statusline(
             db,
             payload=body,
             received_at=received_at,
@@ -333,6 +370,47 @@ async def receive_statusline(body: dict, request: Request) -> dict:
         lines_removed=lines_removed,
         timestamp=received_at,
     )
+
+    if v2_log_id is not None:
+        enricher = IdEnricher(db)
+        process_id = await enricher.process_id(
+            pid=pid, source_system=source_system, cwd=cwd
+        )
+        epoch_id = await enricher.epoch_id(
+            session_id=session_id,
+            pid=pid,
+            source_system=source_system,
+            cwd=cwd,
+        )
+        await broadcast_statusline_logged(
+            log_id=v2_log_id,
+            process_id=process_id,
+            epoch_id=epoch_id,
+            pid=pid,
+            source_system=source_system,
+            cwd=cwd,
+            session_id=session_id,
+            project_dir=workspace.get("project_dir") or None,
+            model_id=model.get("id") or None,
+            model_name=model_name,
+            claude_version=body.get("version") or None,
+            cost_usd=cost_usd,
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+            context_used_pct=context_used_pct,
+            context_window_size=context_window_size,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
+            api_duration_seconds=(
+                (api_duration_ms / 1000.0) if api_duration_ms else None
+            ),
+            lines_added=lines_added,
+            lines_removed=lines_removed,
+            exceeds_200k_tokens=bool(body.get("exceeds_200k_tokens")),
+            received_at=received_at,
+            received_by="statusline-endpoint",
+        )
 
     return {"status": "ok"}
 

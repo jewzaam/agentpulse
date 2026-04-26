@@ -869,7 +869,7 @@ async def insert_log_hook(
     received_by: str,
     entrypoint: str | None = None,
     raw_payload: str | None = None,
-) -> bool:
+) -> int | None:
     """Insert a hook payload into claude_log_hooks.
 
     All v2-column values are extracted from `payload`. The two pieces that
@@ -882,16 +882,16 @@ async def insert_log_hook(
     have the original byte-for-byte text (the v1 replay path) should pass
     it explicitly to preserve provenance.
 
-    Returns False (without inserting) if `payload` lacks a `pid` field —
-    such rows would orphan in v2's process derivation. See
-    docs/old/data-migration.md.
+    Returns the new row's id, or None (without inserting) if `payload`
+    lacks a `pid` field — such rows would orphan in v2's process derivation.
+    See docs/old/data-migration.md.
     """
     if not isinstance(payload, dict) or "pid" not in payload:
-        return False
+        return None
 
     resolved_raw = raw_payload if raw_payload is not None else json.dumps(payload)
 
-    await db.execute(
+    cursor = await db.execute(
         """
         INSERT INTO claude_log_hooks (
             pid, session_id, source_system, cwd, agent_id,
@@ -917,7 +917,7 @@ async def insert_log_hook(
             resolved_raw,
         ),
     )
-    return True
+    return cursor.lastrowid
 
 
 async def insert_log_statusline(
@@ -927,7 +927,7 @@ async def insert_log_statusline(
     received_at: float,
     received_by: str,
     raw_payload: str | None = None,
-) -> bool:
+) -> int | None:
     """Insert a statusline payload into claude_log_statuslines.
 
     All v2-column values are extracted from `payload`. The wire-receipt
@@ -935,10 +935,11 @@ async def insert_log_statusline(
     `raw_payload` defaults to `json.dumps(payload)`; pass explicitly to
     preserve original byte-for-byte text.
 
-    Returns False (without inserting) if `payload` lacks a `pid` field.
+    Returns the new row's id, or None (without inserting) if `payload`
+    lacks a `pid` field.
     """
     if not isinstance(payload, dict) or "pid" not in payload:
-        return False
+        return None
 
     workspace = payload.get("workspace") or {}
     model = payload.get("model") or {}
@@ -947,7 +948,7 @@ async def insert_log_statusline(
     current_usage = ctx.get("current_usage") or {}
     resolved_raw = raw_payload if raw_payload is not None else json.dumps(payload)
 
-    await db.execute(
+    cursor = await db.execute(
         """
         INSERT INTO claude_log_statuslines (
             pid, session_id, source_system, cwd,
@@ -989,7 +990,7 @@ async def insert_log_statusline(
             resolved_raw,
         ),
     )
-    return True
+    return cursor.lastrowid
 
 
 # ---- v1 → v2 replay -----------------------------------------------------------
@@ -1023,7 +1024,7 @@ async def _replay_hooks_from_v1(db: aiosqlite.Connection) -> int:
         if sid not in entrypoint_cache:
             entrypoint_cache[sid] = await _entrypoint_for_session(db, session_id=sid)
 
-        ok = await insert_log_hook(
+        log_id = await insert_log_hook(
             db,
             payload=payload,
             received_at=row["received_at"],
@@ -1031,7 +1032,7 @@ async def _replay_hooks_from_v1(db: aiosqlite.Connection) -> int:
             entrypoint=entrypoint_cache.get(sid),
             raw_payload=row["raw_payload"],
         )
-        if ok:
+        if log_id is not None:
             inserted += 1
         else:
             skipped_no_pid += 1
@@ -1060,14 +1061,14 @@ async def _replay_statuslines_from_v1(db: aiosqlite.Connection) -> int:
         except json.JSONDecodeError:
             payload = {}
 
-        ok = await insert_log_statusline(
+        log_id = await insert_log_statusline(
             db,
             payload=payload,
             received_at=row["received_at"],
             received_by="statusline-endpoint-v1-replay",
             raw_payload=row["raw_payload"],
         )
-        if ok:
+        if log_id is not None:
             inserted += 1
         else:
             skipped_no_pid += 1
