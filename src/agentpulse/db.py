@@ -6,7 +6,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from agentpulse.platforms.claude.schema import create_tables
+from agentpulse.platforms.claude.schema import create_tables, replay_v1_to_v2_logs
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ async def init_db(*, db_path: Path) -> aiosqlite.Connection:
     await _db.execute("PRAGMA journal_mode=WAL")
     _db.row_factory = aiosqlite.Row
     await create_tables(_db)
+    await replay_v1_to_v2_logs(_db)
     logger.info("database opened path=%s", db_path)
     return _db
 
