@@ -21,7 +21,11 @@ from agentpulse.api.v2.queries.log import (
     get_log_statuslines,
 )
 from agentpulse.api.v2.queries.processes import get_process_by_id, get_processes
-from agentpulse.api.v2.queries.sessions import get_session_by_id, get_sessions
+from agentpulse.api.v2.queries.sessions import (
+    get_session_by_id,
+    get_session_epochs,
+    get_sessions,
+)
 
 __all__ = [
     "IdEnricher",
@@ -32,5 +36,6 @@ __all__ = [
     "get_process_by_id",
     "get_processes",
     "get_session_by_id",
+    "get_session_epochs",
     "get_sessions",
 ]

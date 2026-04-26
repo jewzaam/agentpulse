@@ -170,6 +170,16 @@ async def get_session(session_id: str) -> SessionResponse:
     return _session_to_response(sess)
 
 
+@router.get("/sessions/{session_id}/epochs", response_model=list[EpochResponse])
+async def list_session_epochs(session_id: str) -> list[EpochResponse]:
+    """Process epochs for a session — same list as session detail's epochs[]."""
+    db = await get_db()
+    epochs = await queries.get_session_epochs(db, session_id=session_id)
+    if epochs is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [_epoch_to_response(e) for e in epochs]
+
+
 # ---- /log/hooks --------------------------------------------------------------
 
 

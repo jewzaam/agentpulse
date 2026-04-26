@@ -67,32 +67,45 @@ async def _session_window(
 async def _epochs_for_session(
     db: aiosqlite.Connection, *, session_id: str
 ) -> list[dict]:
-    """One epoch per distinct (session_id, pid). Cwd / source_system come from
-    the earliest row per pid; the schema docs treat (session_id, pid) as the
-    epoch key — pid changes mid-session are the resume-into-new-process case.
+    """One epoch per distinct (session_id, pid). UNIONs hooks + statuslines
+    so a session that has only statuslines (statusline-discovered) still
+    yields its open epoch.
+
+    started_at = MIN(received_at) across both tables in the (session_id, pid)
+    span — same input IdEnricher.epoch_id uses, so epoch_id is consistent
+    whether produced from session detail or from a raw log row.
+
+    ended_at = the matching claude_log_pid_deaths.observed_at when one
+    exists for the (pid, source_system, cwd) tuple; otherwise None for an
+    alive epoch.
     """
     cursor = await db.execute(
         """
         SELECT pid, source_system, cwd,
                MIN(received_at) AS started_at,
                MAX(received_at) AS last_activity_at,
-               COUNT(*) AS event_count
-        FROM claude_log_hooks
-        WHERE session_id = ?
-        GROUP BY pid
+               SUM(is_hook) AS event_count
+        FROM (
+            SELECT pid, source_system, cwd, received_at, 1 AS is_hook
+            FROM claude_log_hooks WHERE session_id = ?
+            UNION ALL
+            SELECT pid, source_system, cwd, received_at, 0 AS is_hook
+            FROM claude_log_statuslines WHERE session_id = ?
+        )
+        GROUP BY pid, source_system, cwd
         ORDER BY started_at
         """,
-        (session_id,),
+        (session_id, session_id),
     )
     rows = [dict(r) for r in await cursor.fetchall()]
     if not rows:
         return []
 
     epochs: list[dict] = []
-    last_idx = len(rows) - 1
-    for i, r in enumerate(rows):
-        # Pull entrypoint from the first hook of this epoch (it travels with
-        # each event in v2; the first row is representative).
+    for r in rows:
+        # Entrypoint travels with each hook event in v2 — pull from the
+        # first hook in this epoch. Statusline-only epochs have no
+        # entrypoint until a hook arrives.
         cursor = await db.execute(
             """
             SELECT entrypoint FROM claude_log_hooks
@@ -103,9 +116,22 @@ async def _epochs_for_session(
         )
         ep_row = await cursor.fetchone()
         entrypoint = ep_row["entrypoint"] if ep_row else None
-        # Closed epochs (any but the last by start time) get an ended_at; the
-        # last open epoch leaves it null. Slice B firms this up via pid_deaths.
-        ended_at = None if i == last_idx else r["last_activity_at"]
+
+        # ended_at: take the latest pid_death for the (pid, source, cwd)
+        # tuple whose observed_at is at-or-after this epoch's last activity
+        # (i.e. the death that closed this instance). Earlier deaths belong
+        # to other reuse instances on the same tuple.
+        cursor = await db.execute(
+            """
+            SELECT MIN(observed_at) AS m FROM claude_log_pid_deaths
+            WHERE pid = ? AND source_system = ? AND cwd = ?
+                  AND observed_at >= ?
+            """,
+            (r["pid"], r["source_system"], r["cwd"], r["last_activity_at"]),
+        )
+        d_row = await cursor.fetchone()
+        ended_at = float(d_row["m"]) if d_row and d_row["m"] is not None else None
+
         epoch_id = derive_epoch_id(
             session_id=session_id,
             pid=r["pid"],
@@ -130,7 +156,7 @@ async def _epochs_for_session(
                 "entrypoint": entrypoint,
                 "started_at": r["started_at"],
                 "ended_at": ended_at,
-                "event_count": r["event_count"],
+                "event_count": int(r["event_count"]) if r["event_count"] else 0,
             }
         )
     return epochs
@@ -272,3 +298,17 @@ async def get_session_by_id(
     sess["epochs"] = await _epochs_for_session(db, session_id=session_id)
     sess["agents"] = await agents_for_session(db, session_id=session_id)
     return sess
+
+
+async def get_session_epochs(
+    db: aiosqlite.Connection, *, session_id: str
+) -> list[dict] | None:
+    """Standalone epoch list for a session.
+
+    Returns None when the session is unknown (no hook or statusline rows).
+    Returns the same list shape as session detail's nested epochs[].
+    """
+    win = await _session_window(db, session_id=session_id)
+    if win is None:
+        return None
+    return await _epochs_for_session(db, session_id=session_id)

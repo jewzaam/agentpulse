@@ -104,13 +104,15 @@ src/agentpulse/
 - **Platform-scoped tables** — All tables prefixed `claude_`. v1 tables:
   `claude_sessions`, `claude_agents`, `claude_events`, `claude_statusline`,
   `claude_costs`, `claude_limits`. v2 append-only log tables:
-  `claude_log_hooks`, `claude_log_statuslines`, `claude_log_pid_deaths`
-  (more in slice C). Future platforms get their own tables. Normalization
-  happens at the API layer, not in storage.
+  `claude_log_hooks`, `claude_log_statuslines`, `claude_log_pid_deaths`,
+  `claude_log_api_limits`. Future platforms get their own tables.
+  Normalization happens at the API layer, not in storage.
 - **v2 inserters return the row id** — `insert_log_hook`, `insert_log_statusline`
   return `int | None` (None when payload lacks `pid`). `insert_log_pid_death`
-  returns `int` (always inserts). Hooks.py uses the returned id to broadcast
-  `*_logged` frames on `/ws/v2` after the dual-write commits.
+  returns `int` (always inserts). `insert_log_api_limits` returns
+  `(int, dict)` — the row id plus the normalized fields the broadcast
+  needs. Callers use the returned id to broadcast `*_logged` frames on
+  `/ws/v2` after the dual-write commits.
 - **REST responses and WebSocket broadcasts must match** — every data field on a
   session or event in the REST API must also appear in the corresponding WebSocket
   broadcast. Consumers should be able to build the same view from either source.
@@ -150,7 +152,12 @@ have `session_id`.
 - `pid_death_logged` — every row in `claude_log_pid_deaths`.
   Process-scoped (no session_id/epoch_id). Client action: mark every
   session under `process_id` as ended.
-- (`api_limits_logged` lands in slice C.)
+- `api_limits_logged` — every row in `claude_log_api_limits`. Account-
+  scoped (no process_id/session_id). Carries `five_hour_utilization`,
+  `five_hour_resets_at`, `seven_day_utilization`, `seven_day_resets_at`
+  (resets normalized to epoch seconds) plus `log_id`. Other buckets
+  (e.g. `seven_day_opus`) live in `raw_response` only — fetch via
+  `GET /api/v2/log/api-limits` if you need them.
 
 **`raw_payload` is not on the wire** for `hook_logged` /
 `statusline_logged` — clients that need it fetch via `/api/v2/log/hooks`
