@@ -7,7 +7,7 @@ import logging
 import time
 
 import aiosqlite
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 
 from agentpulse.db import get_db
 from agentpulse.events import (
@@ -62,12 +62,15 @@ async def _handle_agent_event(
 
 
 @router.post("/hooks/claude")
-async def receive_hook(payload: ClaudeHookPayload) -> dict:
+async def receive_hook(payload: ClaudeHookPayload, request: Request) -> dict:
     """Process an incoming Claude Code hook event."""
     db = await get_db()
     received_at = time.time()
     event = payload.hook_event_name
+    # v1 stores Pydantic-normalized JSON (existing behavior); v2 stores the
+    # original wire bytes so optional-field defaults aren't injected.
     raw = json.dumps(payload.model_dump())
+    raw_wire = (await request.body()).decode("utf-8")
 
     logger.debug(
         "hook received session=%s event=%s tool=%s agent=%s",
@@ -121,6 +124,22 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
             received_at=received_at,
             raw_payload=raw,
         )
+
+        # v2 dual-write — derive payload from the wire body so optional-field
+        # defaults from Pydantic don't leak into raw_payload.
+        try:
+            wire_payload = json.loads(raw_wire) if raw_wire else {}
+        except json.JSONDecodeError:
+            wire_payload = {}
+        await schema.insert_log_hook(
+            db,
+            payload=wire_payload,
+            received_at=received_at,
+            received_by="hook-endpoint",
+            entrypoint=entrypoint,
+            raw_payload=raw_wire,
+        )
+        await db.commit()
     except aiosqlite.Error:
         logger.exception(
             "database error processing hook session=%s event=%s",
@@ -163,7 +182,7 @@ async def receive_hook(payload: ClaudeHookPayload) -> dict:
 
 
 @router.post("/statusline/claude")
-async def receive_statusline(body: dict) -> dict:
+async def receive_statusline(body: dict, request: Request) -> dict:
     """Receive statusline data from Claude Code.
 
     Stores the full payload with extracted numerics and enriches
@@ -172,6 +191,7 @@ async def receive_statusline(body: dict) -> dict:
     db = await get_db()
     received_at = time.time()
     raw = json.dumps(body)
+    raw_wire = (await request.body()).decode("utf-8")
 
     session_id = body.get("session_id", "")
     if not session_id:
@@ -272,6 +292,16 @@ async def receive_statusline(body: dict) -> dict:
             lines_added=lines_added,
             lines_removed=lines_removed,
         )
+
+        # v2 dual-write
+        await schema.insert_log_statusline(
+            db,
+            payload=body,
+            received_at=received_at,
+            received_by="statusline-endpoint",
+            raw_payload=raw_wire,
+        )
+        await db.commit()
     except aiosqlite.Error:
         logger.exception(
             "database error processing statusline session=%s",
