@@ -126,6 +126,10 @@ def run(*, config_path: Path) -> int:  # pragma: no cover — GUI blocking
 
     from agentpulse.config import get_settings, set_config_path
 
+    set_config_path(config_path=config_path)
+    settings = get_settings()
+    pidfile.set_base_dir(settings.pidfile_dir)
+
     try:
         acquire_singleton()
     except AlreadyRunningError as exc:
@@ -133,8 +137,6 @@ def run(*, config_path: Path) -> int:  # pragma: no cover — GUI blocking
         return 1
 
     try:
-        set_config_path(config_path=config_path)
-        settings = get_settings()
         supervisor.configure(config_path=config_path)
 
         state = TrayState()

@@ -95,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("Failed to initialize database at %s", settings.db_path)
         raise
 
+    pidfile.set_base_dir(settings.pidfile_dir)
     pidfile.write_pid(SERVICE_PIDFILE_NAME)
     logger.info("wrote pidfile %s", pidfile.pidfile_path(SERVICE_PIDFILE_NAME))
 

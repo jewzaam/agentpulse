@@ -49,6 +49,23 @@ class TestSettings:
         settings = Settings()
         assert isinstance(settings.db_path, Path)
 
+    def test_pidfile_dir_default(self) -> None:
+        settings = Settings()
+        assert settings.pidfile_dir == Path.home() / ".claude" / "agentpulse"
+
+    def test_pidfile_dir_from_file(self, tmp_path: Path) -> None:
+        config = tmp_path / "config.json"
+        config.write_text(json.dumps({"pidfile_dir": "/custom/pid/dir"}))
+        settings = Settings.from_config(config_path=config)
+        assert settings.pidfile_dir == Path("/custom/pid/dir")
+
+    def test_pidfile_dir_expanduser(self, tmp_path: Path) -> None:
+        """A ~ in pidfile_dir is expanded just like db_path / log_file."""
+        config = tmp_path / "config.json"
+        config.write_text(json.dumps({"pidfile_dir": "~/.testpids"}))
+        settings = Settings.from_config(config_path=config)
+        assert settings.pidfile_dir == Path.home() / ".testpids"
+
     def test_invalid_json_uses_defaults(self, tmp_path: Path) -> None:
         config = tmp_path / "config.json"
         config.write_text("{bad json")

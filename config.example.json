@@ -3,6 +3,7 @@
   "port": 17385,
   "db_path": "~/.claude/agentpulse/agentpulse.db",
   "log_file": "~/.claude/agentpulse/agentpulse.log",
+  "pidfile_dir": "~/.claude/agentpulse",
   "log_level": "INFO",
   "discovery_interval_seconds": 5,
   "fetch_limits": false
