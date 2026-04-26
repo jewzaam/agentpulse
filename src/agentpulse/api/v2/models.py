@@ -127,6 +127,19 @@ class EventResponse(BaseModel):
     raw_payload: str | None = None
 
 
+class PidDeathResponse(BaseModel):
+    """PID death log row — claude_log_pid_deaths projection."""
+
+    id: int
+    pid: int
+    source_system: str
+    cwd: str
+    process_id: str
+    platform: str = "claude"
+    observed_at: float
+    observed_by: str
+
+
 class StatuslineResponse(BaseModel):
     """Statusline log row — claude_log_statuslines projection."""
 

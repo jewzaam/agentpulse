@@ -189,6 +189,7 @@ async def receive_hook(payload: ClaudeHookPayload, request: Request) -> dict:
             pid=payload.pid,
             source_system=payload.source_system,
             cwd=payload.cwd,
+            received_at=received_at,
         )
         epoch_id = await enricher.epoch_id(
             session_id=payload.session_id,
@@ -374,7 +375,10 @@ async def receive_statusline(body: dict, request: Request) -> dict:
     if v2_log_id is not None:
         enricher = IdEnricher(db)
         process_id = await enricher.process_id(
-            pid=pid, source_system=source_system, cwd=cwd
+            pid=pid,
+            source_system=source_system,
+            cwd=cwd,
+            received_at=received_at,
         )
         epoch_id = await enricher.epoch_id(
             session_id=session_id,

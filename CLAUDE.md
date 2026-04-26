@@ -58,22 +58,42 @@ with extracted numerics) and enriches `claude_sessions` with the latest values.
 
 ## Architecture
 
+v1 and v2 coexist during the rollout. Hooks and statuslines dual-write
+to both layers. v1 endpoints/tables retire in slice E. See
+`docs/old/changes-with-v2.md` for the slicing plan and `plan-v2-refactor.md`
+for current slice status.
+
 ```
 src/agentpulse/
-├── app.py                        # FastAPI factory + lifespan (discovery loop)
+├── app.py                        # FastAPI factory + lifespan (discovery + pid watcher loops)
 ├── config.py                     # Settings from config file (--config required)
 ├── db.py                         # SQLite singleton (aiosqlite, WAL mode)
-├── models.py                     # Normalized Pydantic response models
-├── websocket.py                  # ConnectionManager + /ws endpoint
+├── models.py                     # v1 normalized Pydantic response models
+├── websocket.py                  # v1 ConnectionManager + /ws endpoint
+├── events.py                     # v1 broadcast functions
 ├── platforms/claude/
-│   ├── hooks.py                  # POST /hooks/claude, /statusline/claude, /costs/claude
-│   ├── discovery.py              # PID liveness checks + entrypoint detection
+│   ├── hooks.py                  # POST /hooks/claude, /statusline/claude, /costs/claude (dual-writes v1+v2)
+│   ├── discovery.py              # v1 session-level PID liveness + entrypoint detection
+│   ├── pid_watcher.py            # v2 PID death watcher → claude_log_pid_deaths
 │   ├── limits.py                 # OAuth API usage limit fetching + DB cache
-│   ├── schema.py                 # claude_* table DDL + all CRUD queries
-│   └── models.py                 # Claude-specific Pydantic models + derive_state()
+│   ├── schema.py                 # claude_* DDL + queries (v1 + v2 log_* tables, inserters, replay)
+│   └── models.py                 # Claude payload models + v1 derive_state()
 └── api/
-    ├── sessions.py               # Normalized endpoints: /api/v1/sessions, /summary, /limits
-    └── claude.py                 # Raw endpoints: /api/v1/claude/sessions, /events
+    ├── sessions.py               # v1: /api/v1/sessions, /summary, /limits
+    ├── claude.py                 # v1: /api/v1/claude/sessions, /events
+    └── v2/
+        ├── router.py             # /api/v2/processes, /sessions, /log/{hooks,statuslines,pid-deaths}
+        ├── models.py             # ProcessResponse, SessionResponse, EpochResponse, ...
+        ├── ids.py                # process_id, epoch_id (sha256 prefix-16)
+        ├── state.py              # v2 derive_state (Stop → ready) + compute_effective_state
+        ├── websocket.py          # /ws/v2 endpoint (separate ConnectionManager from v1)
+        ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged
+        └── queries/              # projection layer over claude_log_* tables
+            ├── log.py            # raw filtered reads
+            ├── enrich.py         # IdEnricher (per-request id cache)
+            ├── sessions.py       # session/epoch derivation
+            ├── processes.py      # process derivation (consults pid_deaths for ended_at/pid_alive)
+            └── _helpers.py       # shared latest-hook + agent helpers
 ```
 
 ## Key Design Decisions
@@ -81,9 +101,16 @@ src/agentpulse/
 - **Raw events stored, state derived at query time** — DB has `last_event` and `last_tool`,
   not a `state` column. `derive_state()` in `platforms/claude/models.py` computes state
   strings at the API layer. Do not store computed states.
-- **Platform-scoped tables** — All tables prefixed `claude_` (e.g., `claude_sessions`,
-  `claude_events`, `claude_statusline`, `claude_limits`). Future platforms get their own
-  tables. Normalization happens in `api/sessions.py`, not in storage.
+- **Platform-scoped tables** — All tables prefixed `claude_`. v1 tables:
+  `claude_sessions`, `claude_agents`, `claude_events`, `claude_statusline`,
+  `claude_costs`, `claude_limits`. v2 append-only log tables:
+  `claude_log_hooks`, `claude_log_statuslines`, `claude_log_pid_deaths`
+  (more in slice C). Future platforms get their own tables. Normalization
+  happens at the API layer, not in storage.
+- **v2 inserters return the row id** — `insert_log_hook`, `insert_log_statusline`
+  return `int | None` (None when payload lacks `pid`). `insert_log_pid_death`
+  returns `int` (always inserts). Hooks.py uses the returned id to broadcast
+  `*_logged` frames on `/ws/v2` after the dual-write commits.
 - **REST responses and WebSocket broadcasts must match** — every data field on a
   session or event in the REST API must also appear in the corresponding WebSocket
   broadcast. Consumers should be able to build the same view from either source.
@@ -94,21 +121,57 @@ src/agentpulse/
 
 ## WebSocket API
 
+Two endpoints run side by side during the v1→v2 rollout. Each has its own
+`ConnectionManager`; the streams do not cross-broadcast. Pick one per
+client.
+
+### v1 — `/ws`
+
 **Endpoint:** `ws://host:port/ws` — receive-only JSON text frames.
 
-**Message types:** `session_discovered`, `session_ended`, `session_cleared`, `hook_event`,
-`agent_started`, `agent_stopped`, `statusline_update`, `limits_updated`. Every message
-has `type`, `platform`, and `timestamp`. Most have `session_id`.
+**Message types:** `session_discovered`, `session_ended`, `session_cleared`,
+`hook_event`, `agent_started`, `agent_stopped`, `statusline_update`,
+`limits_updated`. Every message has `type`, `platform`, `timestamp`. Most
+have `session_id`.
 
-**Client pattern:** Bootstrap via `GET /api/v1/sessions` on connect, then apply WebSocket
-updates incrementally by switching on `message.type`.
+**Bootstrap:** `GET /api/v1/sessions`.
 
-**Full client guide:** [docs/design/clients.md](docs/design/clients.md) — all message types,
-shapes, REST endpoints, derived state mapping, and client implementation notes.
+### v2 — `/ws/v2`
 
-**Ping/pong:** AgentPulse does NOT send WebSocket pings. Clients that expect server-initiated
-pings will timeout and disconnect. Configure the client to either disable ping expectations
-or send its own keep-alive pings.
+**Endpoint:** `ws://host:port/ws/v2` — receive-only JSON text frames.
+
+**Message types:** one per `claude_log_*` table:
+- `hook_logged` — every row in `claude_log_hooks`. Carries the row's
+  columns plus derived `process_id`, `epoch_id`, `log_id`. Clients
+  dispatch on `event_name` (`SessionStart`, `PreToolUse`, `Stop`, etc.)
+  for the typed signal they want.
+- `statusline_logged` — every row in `claude_log_statuslines`. Cost,
+  context, model, etc., plus derived ids and `log_id`.
+- `pid_death_logged` — every row in `claude_log_pid_deaths`.
+  Process-scoped (no session_id/epoch_id). Client action: mark every
+  session under `process_id` as ended.
+- (`api_limits_logged` lands in slice C.)
+
+**`raw_payload` is not on the wire** for `hook_logged` /
+`statusline_logged` — clients that need it fetch via `/api/v2/log/hooks`
+or `/api/v2/log/statuslines` (raw_payload included by default on those
+endpoints).
+
+**Bootstrap:** `GET /api/v2/processes?active=true` for the initial process
+list with nested sessions, then apply incoming frames.
+
+**Full v2 protocol:** [docs/design/websocket.md](docs/design/websocket.md).
+
+### Common to both
+
+**Ping/pong:** AgentPulse does NOT send WebSocket pings. Clients that
+expect server-initiated pings will timeout and disconnect. Configure the
+client to either disable ping expectations or send its own keep-alive
+pings.
+
+**Client guides:**
+- v1: [docs/old/clients.md](docs/old/clients.md)
+- v2: [docs/design/clients.md](docs/design/clients.md)
 
 ## Testing
 

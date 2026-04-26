@@ -212,6 +212,112 @@ class TestGetLogStatuslines:
         assert rows[0]["received_at"] == 110.0
 
 
+class TestGetLogPidDeaths:
+    async def test_returns_all_in_id_order(self, db) -> None:
+        await schema.insert_log_pid_death(
+            db,
+            pid=1,
+            source_system="h",
+            cwd="/p",
+            observed_at=100.0,
+            observed_by="pid-watcher",
+        )
+        await schema.insert_log_pid_death(
+            db,
+            pid=2,
+            source_system="h",
+            cwd="/p",
+            observed_at=200.0,
+            observed_by="pid-watcher",
+        )
+        await db.commit()
+        rows = await queries.get_log_pid_deaths(db)
+        assert len(rows) == 2
+        assert rows[0]["pid"] == 1
+        assert rows[1]["pid"] == 2
+
+    async def test_filter_by_pid(self, db) -> None:
+        await schema.insert_log_pid_death(
+            db,
+            pid=1,
+            source_system="h",
+            cwd="/p",
+            observed_at=100.0,
+            observed_by="pid-watcher",
+        )
+        await schema.insert_log_pid_death(
+            db,
+            pid=2,
+            source_system="h",
+            cwd="/p",
+            observed_at=110.0,
+            observed_by="pid-watcher",
+        )
+        await db.commit()
+        rows = await queries.get_log_pid_deaths(db, pid=2)
+        assert len(rows) == 1
+        assert rows[0]["pid"] == 2
+
+    async def test_filter_by_observed_at_range(self, db) -> None:
+        for ts in (100.0, 200.0, 300.0):
+            await schema.insert_log_pid_death(
+                db,
+                pid=1,
+                source_system="h",
+                cwd="/p",
+                observed_at=ts,
+                observed_by="pid-watcher",
+            )
+        await db.commit()
+        rows = await queries.get_log_pid_deaths(db, since=150.0, until=250.0)
+        assert len(rows) == 1
+        assert rows[0]["observed_at"] == 200.0
+
+
+class TestProcessDerivationWithDeath:
+    async def test_pid_alive_false_when_death_recorded(self, db) -> None:
+        await _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        await schema.insert_log_pid_death(
+            db,
+            pid=10,
+            source_system="host",
+            cwd="/proj",
+            observed_at=500.0,
+            observed_by="pid-watcher",
+        )
+        await db.commit()
+        procs = await queries.get_processes(db)
+        assert len(procs) == 1
+        assert procs[0]["pid_alive"] is False
+        assert procs[0]["ended_at"] == 500.0
+
+    async def test_pid_alive_true_without_death(self, db) -> None:
+        await _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        procs = await queries.get_processes(db)
+        assert procs[0]["pid_alive"] is True
+        assert procs[0]["ended_at"] is None
+
+    async def test_active_only_excludes_dead(self, db) -> None:
+        await _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        await _seed_hook(db, session_id="s2", pid=20, received_at=110.0)
+        await schema.insert_log_pid_death(
+            db,
+            pid=10,
+            source_system="host",
+            cwd="/proj",
+            observed_at=500.0,
+            observed_by="pid-watcher",
+        )
+        await db.commit()
+
+        procs_all = await queries.get_processes(db)
+        assert len(procs_all) == 2
+
+        procs_active = await queries.get_processes(db, active_only=True)
+        assert len(procs_active) == 1
+        assert procs_active[0]["pid"] == 20
+
+
 class TestGetProcesses:
     async def test_groups_by_pid_source_cwd(self, db) -> None:
         # Two distinct processes
