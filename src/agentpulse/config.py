@@ -21,6 +21,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17385
 DEFAULT_DB_PATH = CLAUDE_HOME / "agentpulse" / "agentpulse.db"
 DEFAULT_LOG_FILE = CLAUDE_HOME / "agentpulse" / "agentpulse.log"
+DEFAULT_PIDFILE_DIR = CLAUDE_HOME / "agentpulse"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_DISCOVERY_INTERVAL_SECONDS = 5
 
@@ -33,6 +34,7 @@ class Settings:
     port: int = DEFAULT_PORT
     db_path: Path = field(default_factory=lambda: DEFAULT_DB_PATH)
     log_file: Path = field(default_factory=lambda: DEFAULT_LOG_FILE)
+    pidfile_dir: Path = field(default_factory=lambda: DEFAULT_PIDFILE_DIR)
     log_level: str = DEFAULT_LOG_LEVEL
     discovery_interval_seconds: int = DEFAULT_DISCOVERY_INTERVAL_SECONDS
     fetch_limits: bool = False
@@ -62,6 +64,13 @@ class Settings:
         log_file_str = data.get("log_file")
         log_file = Path(log_file_str).expanduser() if log_file_str else DEFAULT_LOG_FILE
 
+        pidfile_dir_str = data.get("pidfile_dir")
+        pidfile_dir = (
+            Path(pidfile_dir_str).expanduser()
+            if pidfile_dir_str
+            else DEFAULT_PIDFILE_DIR
+        )
+
         log_level = data.get("log_level", DEFAULT_LOG_LEVEL)
 
         return cls(
@@ -69,6 +78,7 @@ class Settings:
             port=int(data.get("port", DEFAULT_PORT)),
             db_path=db_path,
             log_file=log_file,
+            pidfile_dir=pidfile_dir,
             log_level=str(log_level).upper(),
             discovery_interval_seconds=int(
                 data.get(

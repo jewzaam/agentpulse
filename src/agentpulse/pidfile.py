@@ -14,11 +14,34 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Default pidfile directory used when no override is set. Settings can
+# override at runtime via set_base_dir() — the service and tray call that
+# at startup with the configured `pidfile_dir`. Tests that monkey-patch
+# `_BASE_DIR` directly continue to work because _get_base_dir() falls back
+# to it when no override exists.
 _BASE_DIR = Path.home() / ".claude" / "agentpulse"
+
+_override_base_dir: Path | None = None
+
+
+def set_base_dir(base_dir: Path) -> None:
+    """Override the pidfile directory at runtime. Idempotent across calls."""
+    global _override_base_dir
+    _override_base_dir = base_dir
+
+
+def reset_base_dir() -> None:
+    """Clear any override (for testing)."""
+    global _override_base_dir
+    _override_base_dir = None
+
+
+def _get_base_dir() -> Path:
+    return _override_base_dir if _override_base_dir is not None else _BASE_DIR
 
 
 def pidfile_path(name: str) -> Path:
-    return _BASE_DIR / f"{name}.pid"
+    return _get_base_dir() / f"{name}.pid"
 
 
 def write_pid(name: str, *, pid: int | None = None) -> Path:

@@ -35,8 +35,11 @@ make install-autostart-tray      # Component: tray auto-start (opt-in; not part 
 All configuration via `~/.claude/agentpulse/config.json` (`--config` is required on CLI).
 See `config.example.json` for the schema. No environment variable overrides.
 
-Key settings: `host`, `port`, `db_path`, `log_file`, `log_level`, `discovery_interval_seconds`,
-`fetch_limits` (bool — enables OAuth API usage limit fetching).
+Key settings: `host`, `port`, `db_path`, `log_file`, `pidfile_dir`, `log_level`,
+`discovery_interval_seconds`, `fetch_limits` (bool — enables OAuth API usage limit
+fetching). `pidfile_dir` defaults to `~/.claude/agentpulse/`; override it to run a
+second instance side-by-side (e.g. `oneshot/` for testing) without colliding on
+the live deployment's pidfile.
 
 ## Hook Setup
 

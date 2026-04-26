@@ -12,6 +12,31 @@ from agentpulse import pidfile
 @pytest.fixture(autouse=True)
 def _isolate_pidfile_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pidfile, "_BASE_DIR", tmp_path / "pidfiles")
+    pidfile.reset_base_dir()
+    yield
+    pidfile.reset_base_dir()
+
+
+class TestBaseDirOverride:
+    def test_set_base_dir_overrides_default(self, tmp_path: Path) -> None:
+        custom = tmp_path / "custom-pidfiles"
+        pidfile.set_base_dir(custom)
+        path = pidfile.write_pid("svc", pid=12345)
+        assert path == custom / "svc.pid"
+        assert path.exists()
+
+    def test_reset_base_dir_falls_back_to_default(self, tmp_path: Path) -> None:
+        custom = tmp_path / "custom"
+        pidfile.set_base_dir(custom)
+        pidfile.reset_base_dir()
+        # Without an override, falls back to _BASE_DIR (already monkey-patched)
+        path = pidfile.pidfile_path("svc")
+        assert path.parent == tmp_path / "pidfiles"
+
+    def test_path_uses_override_when_set(self, tmp_path: Path) -> None:
+        custom = tmp_path / "custom"
+        pidfile.set_base_dir(custom)
+        assert pidfile.pidfile_path("svc") == custom / "svc.pid"
 
 
 class TestReadWriteRemove:
