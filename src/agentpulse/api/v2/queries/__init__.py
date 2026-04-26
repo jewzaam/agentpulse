@@ -14,13 +14,18 @@ Public API is re-exported here so callers do
 """
 
 from agentpulse.api.v2.queries.enrich import IdEnricher
-from agentpulse.api.v2.queries.log import get_log_hooks, get_log_statuslines
+from agentpulse.api.v2.queries.log import (
+    get_log_hooks,
+    get_log_pid_deaths,
+    get_log_statuslines,
+)
 from agentpulse.api.v2.queries.processes import get_process_by_id, get_processes
 from agentpulse.api.v2.queries.sessions import get_session_by_id, get_sessions
 
 __all__ = [
     "IdEnricher",
     "get_log_hooks",
+    "get_log_pid_deaths",
     "get_log_statuslines",
     "get_process_by_id",
     "get_processes",

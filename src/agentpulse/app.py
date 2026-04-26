@@ -19,6 +19,7 @@ from agentpulse.config import get_settings
 from agentpulse.db import close_db, init_db
 from agentpulse.platforms.claude.discovery import run_discovery_tick
 from agentpulse.platforms.claude.hooks import router as hooks_router
+from agentpulse.platforms.claude.pid_watcher import run_pid_watcher_tick
 from agentpulse.websocket import router as ws_router
 
 SERVICE_PIDFILE_NAME = "agentpulse"
@@ -60,6 +61,20 @@ async def _discovery_loop(
         await asyncio.sleep(interval)
 
 
+async def _pid_watcher_loop(
+    db: aiosqlite.Connection,
+    *,
+    interval: int,
+) -> None:
+    """Background task: v2 PID death detection on a timer."""
+    while True:
+        try:
+            await run_pid_watcher_tick(db)
+        except Exception:
+            logger.exception("pid watcher tick failed")
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup and shutdown."""
@@ -86,8 +101,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     discovery_task = asyncio.create_task(
         _discovery_loop(db, interval=settings.discovery_interval_seconds)
     )
+    pid_watcher_task = asyncio.create_task(
+        _pid_watcher_loop(db, interval=settings.discovery_interval_seconds)
+    )
     logger.info(
-        "discovery loop started interval=%ds", settings.discovery_interval_seconds
+        "discovery + pid watcher loops started interval=%ds",
+        settings.discovery_interval_seconds,
     )
 
     try:
@@ -95,10 +114,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         logger.info("shutting down")
         discovery_task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(discovery_task), timeout=3.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
+        pid_watcher_task.cancel()
+        for task in (discovery_task, pid_watcher_task):
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         await close_db()
         pidfile.remove_pid(SERVICE_PIDFILE_NAME)
 

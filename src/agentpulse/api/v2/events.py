@@ -68,6 +68,44 @@ async def broadcast_hook_logged(
     )
 
 
+async def broadcast_pid_death_logged(
+    *,
+    log_id: int,
+    process_id: str,
+    pid: int,
+    source_system: str,
+    cwd: str,
+    observed_at: float,
+    observed_by: str,
+) -> None:
+    """One row in claude_log_pid_deaths → one frame on /ws/v2.
+
+    Process-scoped: no session_id or epoch_id on the wire. The corresponding
+    sessions / agents / epochs flip to ended at the client side based on
+    process_id match.
+    """
+    logger.debug(
+        "broadcast pid_death_logged log_id=%d pid=%d source_system=%s",
+        log_id,
+        pid,
+        source_system,
+    )
+    await manager.broadcast(
+        {
+            "type": "pid_death_logged",
+            "platform": "claude",
+            "timestamp": observed_at,
+            "process_id": process_id,
+            "pid": pid,
+            "source_system": source_system,
+            "cwd": cwd,
+            "observed_at": observed_at,
+            "observed_by": observed_by,
+            "log_id": log_id,
+        }
+    )
+
+
 async def broadcast_statusline_logged(
     *,
     log_id: int,

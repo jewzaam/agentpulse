@@ -14,6 +14,7 @@ from agentpulse.api.v2.models import (
     AgentResponse,
     EpochResponse,
     EventResponse,
+    PidDeathResponse,
     ProcessResponse,
     SessionResponse,
     StatuslineResponse,
@@ -204,7 +205,10 @@ async def list_log_hooks(
     out: list[EventResponse] = []
     for r in rows:
         proc_id = await enricher.process_id(
-            pid=r["pid"], source_system=r["source_system"], cwd=r["cwd"]
+            pid=r["pid"],
+            source_system=r["source_system"],
+            cwd=r["cwd"],
+            received_at=r["received_at"],
         )
         epoch_id = await enricher.epoch_id(
             session_id=r["session_id"],
@@ -264,7 +268,10 @@ async def list_log_statuslines(
     out: list[StatuslineResponse] = []
     for r in rows:
         proc_id = await enricher.process_id(
-            pid=r["pid"], source_system=r["source_system"], cwd=r["cwd"]
+            pid=r["pid"],
+            source_system=r["source_system"],
+            cwd=r["cwd"],
+            received_at=r["received_at"],
         )
         epoch_id = await enricher.epoch_id(
             session_id=r["session_id"],
@@ -300,6 +307,57 @@ async def list_log_statuslines(
                 received_at=r["received_at"],
                 received_by=r["received_by"],
                 raw_payload=r.get("raw_payload"),
+            )
+        )
+    return out
+
+
+# ---- /log/pid-deaths --------------------------------------------------------
+
+
+@router.get("/log/pid-deaths", response_model=list[PidDeathResponse])
+async def list_log_pid_deaths(
+    since: float | None = None,
+    until: float | None = None,
+    pid: int | None = None,
+    source_system: str | None = None,
+    cwd: str | None = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> list[PidDeathResponse]:
+    """Raw read of claude_log_pid_deaths. since/until bound observed_at."""
+    db = await get_db()
+    rows = await queries.get_log_pid_deaths(
+        db,
+        since=since,
+        until=until,
+        pid=pid,
+        source_system=source_system,
+        cwd=cwd,
+        limit=limit,
+        offset=offset,
+    )
+    enricher = queries.IdEnricher(db)
+    out: list[PidDeathResponse] = []
+    for r in rows:
+        # Pass observed_at as the "row time" — the death belongs to the
+        # instance that was alive immediately before observed_at, which
+        # _instance_started_at_for resolves correctly.
+        proc_id = await enricher.process_id(
+            pid=r["pid"],
+            source_system=r["source_system"],
+            cwd=r["cwd"],
+            received_at=r["observed_at"],
+        )
+        out.append(
+            PidDeathResponse(
+                id=r["id"],
+                pid=r["pid"],
+                source_system=r["source_system"],
+                cwd=r["cwd"],
+                process_id=proc_id,
+                observed_at=r["observed_at"],
+                observed_by=r["observed_by"],
             )
         )
     return out

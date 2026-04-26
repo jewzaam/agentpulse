@@ -83,3 +83,34 @@ async def get_log_statuslines(
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def get_log_pid_deaths(
+    db: aiosqlite.Connection,
+    *,
+    since: float | None = None,
+    until: float | None = None,
+    pid: int | None = None,
+    source_system: str | None = None,
+    cwd: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Filtered + paginated read of claude_log_pid_deaths. Ordered by id ASC.
+
+    Time bounds apply to observed_at (the watcher-observation timestamp),
+    not received_at — pid-deaths are observation-sourced, not wire-sourced.
+    """
+    where, params = _build_where(
+        [
+            ("observed_at >= ?", since),
+            ("observed_at <= ?", until),
+            ("pid = ?", pid),
+            ("source_system = ?", source_system),
+            ("cwd = ?", cwd),
+        ]
+    )
+    sql = f"SELECT * FROM claude_log_pid_deaths {where} ORDER BY id LIMIT ? OFFSET ?"
+    cursor = await db.execute(sql, [*params, limit, offset])
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]

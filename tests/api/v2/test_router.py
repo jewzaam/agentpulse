@@ -295,3 +295,63 @@ class TestLogStatuslinesEndpoint:
         resp = client.get("/api/v2/log/statuslines?session_id=s1")
         body = resp.json()
         assert len(body) == 1
+
+
+class TestLogPidDeathsEndpoint:
+    def _seed_death(
+        self, db, *, pid: int, source_system: str, cwd: str, observed_at: float
+    ) -> None:
+        run_async(
+            schema.insert_log_pid_death(
+                db,
+                pid=pid,
+                source_system=source_system,
+                cwd=cwd,
+                observed_at=observed_at,
+                observed_by="pid-watcher",
+            )
+        )
+        run_async(db.commit())
+
+    def test_returns_rows_with_derived_process_id(self, client, db) -> None:
+        # Need a hook for the IdEnricher's earliest-received_at lookup
+        _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        self._seed_death(
+            db, pid=10, source_system="host", cwd="/proj", observed_at=500.0
+        )
+        resp = client.get("/api/v2/log/pid-deaths")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        row = body[0]
+        assert row["pid"] == 10
+        assert row["source_system"] == "host"
+        assert row["cwd"] == "/proj"
+        assert row["observed_at"] == 500.0
+        assert row["observed_by"] == "pid-watcher"
+        assert isinstance(row["process_id"], str) and len(row["process_id"]) == 16
+
+    def test_filter_by_pid(self, client, db) -> None:
+        _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        _seed_hook(db, session_id="s2", pid=20, received_at=110.0)
+        self._seed_death(
+            db, pid=10, source_system="host", cwd="/proj", observed_at=500.0
+        )
+        self._seed_death(
+            db, pid=20, source_system="host", cwd="/proj", observed_at=600.0
+        )
+        resp = client.get("/api/v2/log/pid-deaths?pid=20")
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["pid"] == 20
+
+    def test_observed_at_range_filter(self, client, db) -> None:
+        _seed_hook(db, session_id="s1", pid=10, received_at=100.0)
+        for ts in (100.0, 200.0, 300.0):
+            self._seed_death(
+                db, pid=10, source_system="host", cwd="/proj", observed_at=ts
+            )
+        resp = client.get("/api/v2/log/pid-deaths?since=150&until=250")
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["observed_at"] == 200.0

@@ -236,6 +236,27 @@ CREATE INDEX IF NOT EXISTS idx_claude_log_statuslines_received
 ON claude_log_statuslines(received_at)
 """
 
+_CREATE_LOG_PID_DEATHS = """
+CREATE TABLE IF NOT EXISTS claude_log_pid_deaths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pid INTEGER NOT NULL,
+    source_system TEXT NOT NULL DEFAULT '',
+    cwd TEXT NOT NULL DEFAULT '',
+    observed_at REAL NOT NULL,
+    observed_by TEXT NOT NULL DEFAULT ''
+)
+"""
+
+_CREATE_LOG_PID_DEATHS_PROCESS_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_log_pid_deaths_process
+ON claude_log_pid_deaths(pid, source_system, cwd)
+"""
+
+_CREATE_LOG_PID_DEATHS_OBSERVED_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_log_pid_deaths_observed
+ON claude_log_pid_deaths(observed_at)
+"""
+
 
 async def create_tables(db: aiosqlite.Connection) -> None:
     """Create all claude_* tables if they don't exist."""
@@ -262,6 +283,9 @@ async def create_tables(db: aiosqlite.Connection) -> None:
     await db.execute(_CREATE_LOG_STATUSLINES_SESSION_IDX)
     await db.execute(_CREATE_LOG_STATUSLINES_PROCESS_IDX)
     await db.execute(_CREATE_LOG_STATUSLINES_RECEIVED_IDX)
+    await db.execute(_CREATE_LOG_PID_DEATHS)
+    await db.execute(_CREATE_LOG_PID_DEATHS_PROCESS_IDX)
+    await db.execute(_CREATE_LOG_PID_DEATHS_OBSERVED_IDX)
     await db.commit()
 
 
@@ -1115,3 +1139,36 @@ async def replay_v1_to_v2_logs(db: aiosqlite.Connection) -> dict[str, int]:
         )
 
     return {"hooks": hooks_inserted, "statuslines": statuslines_inserted}
+
+
+# ---- v2 pid-deaths inserter (slice B) ---------------------------------------
+
+
+async def insert_log_pid_death(
+    db: aiosqlite.Connection,
+    *,
+    pid: int,
+    source_system: str,
+    cwd: str,
+    observed_at: float,
+    observed_by: str,
+) -> int:
+    """Insert one death observation into claude_log_pid_deaths.
+
+    The watcher writes here when its OS check confirms a Claude PID is gone.
+    Multiple rows may share the same (pid, source_system, cwd) over time
+    (PID reuse) — the natural identity composite is process-instance-shaped,
+    not row-unique; uniqueness is the autoincrement id.
+
+    Always inserts (no skip path). Returns the new row's id.
+    """
+    cursor = await db.execute(
+        """
+        INSERT INTO claude_log_pid_deaths (
+            pid, source_system, cwd, observed_at, observed_by
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (pid, source_system, cwd, observed_at, observed_by),
+    )
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
