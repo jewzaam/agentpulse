@@ -68,6 +68,40 @@ async def broadcast_hook_logged(
     )
 
 
+async def broadcast_api_limits_logged(
+    *,
+    log_id: int,
+    received_at: float,
+    received_by: str,
+    five_hour_utilization: float | None,
+    five_hour_resets_at: float | None,
+    seven_day_utilization: float | None,
+    seven_day_resets_at: float | None,
+) -> None:
+    """One row in claude_log_api_limits → one frame on /ws/v2.
+
+    Global scope: limits belong to the Anthropic account, not a process or
+    session. No process_id / session_id on the wire. Other buckets (e.g.
+    seven_day_opus) stay in the row's raw_response and are reachable via
+    /api/v2/log/api-limits, not on the broadcast.
+    """
+    logger.debug("broadcast api_limits_logged log_id=%d", log_id)
+    await manager.broadcast(
+        {
+            "type": "api_limits_logged",
+            "platform": "claude",
+            "timestamp": received_at,
+            "received_at": received_at,
+            "received_by": received_by,
+            "log_id": log_id,
+            "five_hour_utilization": five_hour_utilization,
+            "five_hour_resets_at": five_hour_resets_at,
+            "seven_day_utilization": seven_day_utilization,
+            "seven_day_resets_at": seven_day_resets_at,
+        }
+    )
+
+
 async def broadcast_pid_death_logged(
     *,
     log_id: int,

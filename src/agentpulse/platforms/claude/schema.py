@@ -257,6 +257,24 @@ CREATE INDEX IF NOT EXISTS idx_claude_log_pid_deaths_observed
 ON claude_log_pid_deaths(observed_at)
 """
 
+_CREATE_LOG_API_LIMITS = """
+CREATE TABLE IF NOT EXISTS claude_log_api_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    received_at REAL NOT NULL,
+    received_by TEXT NOT NULL DEFAULT '',
+    five_hour_utilization REAL,
+    five_hour_resets_at REAL,
+    seven_day_utilization REAL,
+    seven_day_resets_at REAL,
+    raw_response TEXT NOT NULL DEFAULT ''
+)
+"""
+
+_CREATE_LOG_API_LIMITS_RECEIVED_IDX = """
+CREATE INDEX IF NOT EXISTS idx_claude_log_api_limits_received
+ON claude_log_api_limits(received_at)
+"""
+
 
 async def create_tables(db: aiosqlite.Connection) -> None:
     """Create all claude_* tables if they don't exist."""
@@ -286,6 +304,8 @@ async def create_tables(db: aiosqlite.Connection) -> None:
     await db.execute(_CREATE_LOG_PID_DEATHS)
     await db.execute(_CREATE_LOG_PID_DEATHS_PROCESS_IDX)
     await db.execute(_CREATE_LOG_PID_DEATHS_OBSERVED_IDX)
+    await db.execute(_CREATE_LOG_API_LIMITS)
+    await db.execute(_CREATE_LOG_API_LIMITS_RECEIVED_IDX)
     await db.commit()
 
 
@@ -1105,40 +1125,73 @@ async def _replay_statuslines_from_v1(db: aiosqlite.Connection) -> int:
     return inserted
 
 
-async def replay_v1_to_v2_logs(db: aiosqlite.Connection) -> dict[str, int]:
-    """One-shot replay of v1 raw_payload columns into v2 log tables.
+async def _replay_api_limits_from_v1(db: aiosqlite.Connection) -> int:
+    """Replay claude_limits rows into claude_log_api_limits.
 
-    Idempotent: if either v2 table is non-empty, no work is done. Returns a
-    dict with hook + statusline insert counts (0 each when skipped).
-
-    Skips rows whose raw_payload doesn't contain a `pid` field. Such rows
-    predate the relay's pid injection and would orphan in v2's process
-    derivation; see docs/old/data-migration.md.
+    v1 stored each fetch with `fetched_at` and the full `raw_response`.
+    v2's inserter extracts and ISO-normalizes the bucket fields. Other
+    columns (e.g. v1's stale_after) aren't carried over — they were
+    operational metadata, not row content.
     """
-    hooks_empty = await _table_is_empty(db, "claude_log_hooks")
-    statuslines_empty = await _table_is_empty(db, "claude_log_statuslines")
+    cursor = await db.execute(
+        "SELECT fetched_at, raw_response FROM claude_limits " "ORDER BY fetched_at, id"
+    )
+    src_rows = await cursor.fetchall()
 
-    if not (hooks_empty and statuslines_empty):
-        logger.debug(
-            "replay_v1_to_v2_logs: skipping; v2 tables already populated "
-            "(hooks_empty=%s statuslines_empty=%s)",
-            hooks_empty,
-            statuslines_empty,
+    inserted = 0
+    for row in src_rows:
+        if not row["raw_response"]:
+            continue
+        await insert_log_api_limits(
+            db,
+            received_at=row["fetched_at"],
+            received_by="limits-fetcher-v1-replay",
+            raw_response=row["raw_response"],
         )
-        return {"hooks": 0, "statuslines": 0}
+        inserted += 1
+    return inserted
 
-    hooks_inserted = await _replay_hooks_from_v1(db)
-    statuslines_inserted = await _replay_statuslines_from_v1(db)
+
+async def replay_v1_to_v2_logs(db: aiosqlite.Connection) -> dict[str, int]:
+    """Per-target-table replay of v1 source data into v2 log tables.
+
+    Each target table self-gates: an empty v2 target triggers replay from
+    the corresponding v1 source; a populated v2 target is left alone. This
+    lets new v2 tables added in later slices catch up on existing
+    deployments — earlier replays don't lock new ones out.
+
+    Returns a dict with insert counts per target table (0 each when
+    skipped). Skips v1 hook / statusline rows whose raw_payload lacks a
+    `pid` field (see docs/old/data-migration.md).
+    """
+    counts = {"hooks": 0, "statuslines": 0, "api_limits": 0}
+
+    if await _table_is_empty(db, "claude_log_hooks"):
+        counts["hooks"] = await _replay_hooks_from_v1(db)
+    else:
+        logger.debug("replay: claude_log_hooks already populated, skipping")
+
+    if await _table_is_empty(db, "claude_log_statuslines"):
+        counts["statuslines"] = await _replay_statuslines_from_v1(db)
+    else:
+        logger.debug("replay: claude_log_statuslines already populated, skipping")
+
+    if await _table_is_empty(db, "claude_log_api_limits"):
+        counts["api_limits"] = await _replay_api_limits_from_v1(db)
+    else:
+        logger.debug("replay: claude_log_api_limits already populated, skipping")
+
     await db.commit()
 
-    if hooks_inserted or statuslines_inserted:
+    if any(counts.values()):
         logger.info(
-            "replay_v1_to_v2_logs: replayed %d hooks, %d statuslines",
-            hooks_inserted,
-            statuslines_inserted,
+            "replay_v1_to_v2_logs: replayed %d hooks, %d statuslines, %d api_limits",
+            counts["hooks"],
+            counts["statuslines"],
+            counts["api_limits"],
         )
 
-    return {"hooks": hooks_inserted, "statuslines": statuslines_inserted}
+    return counts
 
 
 # ---- v2 pid-deaths inserter (slice B) ---------------------------------------
@@ -1172,3 +1225,82 @@ async def insert_log_pid_death(
     )
     assert cursor.lastrowid is not None
     return cursor.lastrowid
+
+
+# ---- v2 api-limits inserter (slice C) ---------------------------------------
+
+
+def _iso_to_epoch_seconds(value: object) -> float | None:
+    """Parse an ISO-8601 datetime string to Unix epoch seconds.
+
+    The Anthropic OAuth API returns resets_at as ISO strings (e.g.
+    `"2026-04-13T07:00:00+00:00"`); v2 stores epoch seconds throughout.
+    Returns None when the input is None, empty, or unparseable.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(value).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_api_limits_fields(raw: dict) -> dict:
+    """Extract normalized fields from the OAuth API response."""
+    fh = raw.get("five_hour") or {}
+    sd = raw.get("seven_day") or {}
+    return {
+        "five_hour_utilization": fh.get("utilization"),
+        "five_hour_resets_at": _iso_to_epoch_seconds(fh.get("resets_at")),
+        "seven_day_utilization": sd.get("utilization"),
+        "seven_day_resets_at": _iso_to_epoch_seconds(sd.get("resets_at")),
+    }
+
+
+async def insert_log_api_limits(
+    db: aiosqlite.Connection,
+    *,
+    received_at: float,
+    received_by: str,
+    raw_response: str,
+) -> tuple[int, dict]:
+    """Insert one limits-fetch observation into claude_log_api_limits.
+
+    The full API JSON is stored verbatim in raw_response. Five-hour and
+    seven-day utilization + resets_at are extracted and ISO-normalized to
+    epoch seconds. Other buckets (seven_day_opus, seven_day_sonnet,
+    extra_usage) live in raw_response only.
+
+    Returns (log_id, extracted_fields). The extracted dict carries the
+    same four fields the broadcast frame needs, so callers don't have
+    to re-parse.
+    """
+    try:
+        raw = json.loads(raw_response) if raw_response else {}
+    except json.JSONDecodeError:
+        raw = {}
+    fields = _extract_api_limits_fields(raw if isinstance(raw, dict) else {})
+
+    cursor = await db.execute(
+        """
+        INSERT INTO claude_log_api_limits (
+            received_at, received_by,
+            five_hour_utilization, five_hour_resets_at,
+            seven_day_utilization, seven_day_resets_at,
+            raw_response
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            received_at,
+            received_by,
+            fields["five_hour_utilization"],
+            fields["five_hour_resets_at"],
+            fields["seven_day_utilization"],
+            fields["seven_day_resets_at"],
+            raw_response,
+        ),
+    )
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid, fields

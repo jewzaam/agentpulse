@@ -114,3 +114,28 @@ async def get_log_pid_deaths(
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def get_log_api_limits(
+    db: aiosqlite.Connection,
+    *,
+    since: float | None = None,
+    until: float | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Filtered + paginated read of claude_log_api_limits. Ordered by id ASC.
+
+    Account-scoped — no pid/source_system/cwd filters. since/until bound
+    received_at.
+    """
+    where, params = _build_where(
+        [
+            ("received_at >= ?", since),
+            ("received_at <= ?", until),
+        ]
+    )
+    sql = f"SELECT * FROM claude_log_api_limits {where} ORDER BY id LIMIT ? OFFSET ?"
+    cursor = await db.execute(sql, [*params, limit, offset])
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]

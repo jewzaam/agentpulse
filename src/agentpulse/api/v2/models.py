@@ -127,6 +127,24 @@ class EventResponse(BaseModel):
     raw_payload: str | None = None
 
 
+class ApiLimitsResponse(BaseModel):
+    """API limits log row — claude_log_api_limits projection.
+
+    Account-scoped: no process_id / session_id. Other buckets (e.g.
+    seven_day_opus, extra_usage) live in raw_response only.
+    """
+
+    id: int
+    platform: str = "claude"
+    received_at: float
+    received_by: str
+    five_hour_utilization: float | None = None
+    five_hour_resets_at: float | None = None
+    seven_day_utilization: float | None = None
+    seven_day_resets_at: float | None = None
+    raw_response: str | None = None
+
+
 class PidDeathResponse(BaseModel):
     """PID death log row — claude_log_pid_deaths projection."""
 
