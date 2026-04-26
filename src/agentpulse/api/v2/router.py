@@ -76,6 +76,8 @@ def _session_to_response(d: dict) -> SessionResponse:
         agent_count=d["agent_count"],
         derived_state=d["derived_state"],
         epoch_count=d["epoch_count"],
+        total_cost_usd=d["total_cost_usd"],
+        cost_by_day=d["cost_by_day"],
         epochs=epochs,
         agents=agents,
     )

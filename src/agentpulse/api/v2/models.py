@@ -65,6 +65,8 @@ class SessionResponse(BaseModel):
     agent_count: int = 0
     derived_state: str | None = None
     epoch_count: int = 0
+    total_cost_usd: float = 0.0
+    cost_by_day: dict[str, float] = {}
     epochs: list[EpochResponse] | None = None
     agents: list[AgentResponse] | None = None
 

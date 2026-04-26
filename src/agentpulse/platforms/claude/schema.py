@@ -1012,7 +1012,11 @@ async def insert_log_statusline(
             int(payload["pid"]),
             payload.get("session_id", ""),
             payload.get("source_system", ""),
-            payload.get("cwd", ""),
+            # Statusline payloads sometimes omit top-level cwd and only
+            # carry workspace.project_dir (Claude Code SDK pattern). Mirror
+            # v1's fallback chain so identity matches between hooks and
+            # statuslines for the same process.
+            payload.get("cwd") or workspace.get("project_dir") or "",
             workspace.get("project_dir") or None,
             model.get("id") or None,
             model.get("display_name") or None,
@@ -1088,8 +1092,66 @@ async def _replay_hooks_from_v1(db: aiosqlite.Connection) -> int:
     return inserted
 
 
+async def _hook_pid_index_for_session(
+    db: aiosqlite.Connection, *, session_id: str
+) -> list[tuple[float, int, str]]:
+    """Per-session list of (received_at, pid, cwd) tuples from claude_events.
+
+    Used by the v1 statusline replay to realign mismatched-pid statuslines
+    onto the closest hook's pid. Returned tuples are sorted by received_at.
+    """
+    cursor = await db.execute(
+        "SELECT received_at, raw_payload FROM claude_events "
+        "WHERE session_id = ? ORDER BY received_at",
+        (session_id,),
+    )
+    rows = await cursor.fetchall()
+    out: list[tuple[float, int, str]] = []
+    for r in rows:
+        try:
+            p = json.loads(r["raw_payload"]) if r["raw_payload"] else {}
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(p, dict):
+            continue
+        pid_val = p.get("pid")
+        if not isinstance(pid_val, int):
+            continue
+        out.append((float(r["received_at"]), pid_val, p.get("cwd", "") or ""))
+    return out
+
+
+def _normalize_statusline_pid(
+    hook_index: list[tuple[float, int, str]],
+    *,
+    statusline_cwd: str,
+    statusline_received_at: float,
+) -> int | None:
+    """Find the pid of the hook at the same cwd with the closest received_at.
+
+    Returns None when no hook in the session shares the statusline's cwd —
+    in that case the caller leaves the original pid in place. Used to
+    repair legacy SDK statuslines whose relay injected a pid unrelated to
+    the SDK's actual Claude Code process pid (the hook relay does it
+    correctly via getppid).
+    """
+    candidates = [(t, pid) for t, pid, cwd in hook_index if cwd == statusline_cwd]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: abs(x[0] - statusline_received_at))[1]
+
+
 async def _replay_statuslines_from_v1(db: aiosqlite.Connection) -> int:
-    """Replay claude_statusline rows into claude_log_statuslines."""
+    """Replay claude_statusline rows into claude_log_statuslines.
+
+    For legacy data where the statusline relay injected a pid that doesn't
+    match the hook relay's pid for the same logical Claude Code process
+    (the SDK in-process pattern), this re-aligns each statusline's pid to
+    the closest matching hook's pid before insert. The original payload
+    bytes are preserved verbatim in raw_payload; only the extracted pid
+    column is normalized. After the SDK relay fix lands, new statuslines
+    arrive with the correct pid and don't need normalization.
+    """
     cursor = await db.execute(
         "SELECT received_at, raw_payload FROM claude_statusline "
         "ORDER BY received_at, id"
@@ -1098,12 +1160,32 @@ async def _replay_statuslines_from_v1(db: aiosqlite.Connection) -> int:
 
     inserted = 0
     skipped_no_pid = 0
+    realigned = 0
+    hook_index_cache: dict[str, list[tuple[float, int, str]]] = {}
 
     for row in src_rows:
         try:
             payload = json.loads(row["raw_payload"]) if row["raw_payload"] else {}
         except json.JSONDecodeError:
             payload = {}
+
+        if isinstance(payload, dict):
+            sid = payload.get("session_id", "")
+            workspace = payload.get("workspace") or {}
+            sl_cwd = payload.get("cwd") or workspace.get("project_dir") or ""
+            if sid:
+                if sid not in hook_index_cache:
+                    hook_index_cache[sid] = await _hook_pid_index_for_session(
+                        db, session_id=sid
+                    )
+                normalized_pid = _normalize_statusline_pid(
+                    hook_index_cache[sid],
+                    statusline_cwd=sl_cwd,
+                    statusline_received_at=float(row["received_at"]),
+                )
+                if normalized_pid is not None and normalized_pid != payload.get("pid"):
+                    payload = {**payload, "pid": normalized_pid}
+                    realigned += 1
 
         log_id = await insert_log_statusline(
             db,
@@ -1121,6 +1203,11 @@ async def _replay_statuslines_from_v1(db: aiosqlite.Connection) -> int:
         logger.info(
             "replay_v1_to_v2_logs: dropped %d pid-less statusline rows",
             skipped_no_pid,
+        )
+    if realigned:
+        logger.info(
+            "replay_v1_to_v2_logs: realigned %d statusline pids to nearest hook",
+            realigned,
         )
     return inserted
 

@@ -496,6 +496,62 @@ class TestInsertLogStatusline:
         row = await cursor.fetchone()
         assert row["raw_payload"] == original
 
+    async def test_cwd_falls_back_to_workspace_project_dir(self, db) -> None:
+        """SDK-style payload: only `workspace.project_dir`, no top-level `cwd`.
+
+        Statusline cwd must inherit workspace.project_dir so the (pid,
+        source_system, cwd) tuple matches hooks for the same process.
+        v1's receive_statusline already does this fallback; v2 inserter
+        must too.
+        """
+        payload = {
+            "session_id": "s1",
+            "pid": 1234,
+            "source_system": "host",
+            "workspace": {"project_dir": "C:/Users/me/project"},
+        }
+        await schema.insert_log_statusline(
+            db,
+            payload=payload,
+            received_at=100.0,
+            received_by="statusline-endpoint",
+        )
+        cursor = await db.execute(
+            "SELECT cwd FROM claude_log_statuslines WHERE session_id = 's1'"
+        )
+        row = await cursor.fetchone()
+        assert row["cwd"] == "C:/Users/me/project"
+
+    async def test_cwd_top_level_wins_over_workspace(self, db) -> None:
+        """When both fields exist, top-level cwd wins (matches v1 chain)."""
+        payload = {
+            "session_id": "s1",
+            "pid": 1234,
+            "cwd": "/explicit/cwd",
+            "workspace": {"project_dir": "/different/workspace"},
+        }
+        await schema.insert_log_statusline(
+            db,
+            payload=payload,
+            received_at=100.0,
+            received_by="statusline-endpoint",
+        )
+        cursor = await db.execute("SELECT cwd FROM claude_log_statuslines")
+        row = await cursor.fetchone()
+        assert row["cwd"] == "/explicit/cwd"
+
+    async def test_cwd_empty_when_neither_field_present(self, db) -> None:
+        payload = {"session_id": "s1", "pid": 1234}
+        await schema.insert_log_statusline(
+            db,
+            payload=payload,
+            received_at=100.0,
+            received_by="statusline-endpoint",
+        )
+        cursor = await db.execute("SELECT cwd FROM claude_log_statuslines")
+        row = await cursor.fetchone()
+        assert row["cwd"] == ""
+
 
 class TestReplayIdempotency:
     async def test_skips_when_log_hooks_populated(self, db) -> None:
@@ -571,3 +627,187 @@ class TestReplayIdempotency:
         assert row is not None
         assert row["five_hour_utilization"] == 7.0
         assert row["received_by"] == "limits-fetcher-v1-replay"
+
+
+class TestStatuslinePidRealignment:
+    """Legacy SDK statuslines have a pid that doesn't match the hooks for
+    the same logical Claude Code process. The replay realigns them onto
+    the closest hook's pid (matching session_id + cwd).
+    """
+
+    async def _seed_v1_hook(
+        self,
+        db,
+        *,
+        session_id: str,
+        pid: int,
+        cwd: str,
+        received_at: float,
+    ) -> None:
+        payload = {
+            "session_id": session_id,
+            "hook_event_name": "PreToolUse",
+            "pid": pid,
+            "cwd": cwd,
+            "source_system": "host",
+        }
+        await db.execute(
+            "INSERT INTO claude_events (session_id, event_name, cwd, "
+            "received_at, raw_payload) VALUES (?, ?, ?, ?, ?)",
+            (session_id, "PreToolUse", cwd, received_at, json.dumps(payload)),
+        )
+        await db.commit()
+
+    async def _seed_v1_statusline(
+        self,
+        db,
+        *,
+        session_id: str,
+        pid: int,
+        received_at: float,
+        cwd: str | None = None,
+        project_dir: str | None = None,
+    ) -> None:
+        payload: dict = {
+            "session_id": session_id,
+            "pid": pid,
+            "source_system": "host",
+        }
+        if cwd is not None:
+            payload["cwd"] = cwd
+        if project_dir is not None:
+            payload["workspace"] = {"project_dir": project_dir}
+        await db.execute(
+            "INSERT INTO claude_statusline (session_id, received_at, "
+            "raw_payload) VALUES (?, ?, ?)",
+            (session_id, received_at, json.dumps(payload)),
+        )
+        await db.commit()
+
+    async def test_realigns_mismatched_pid_to_closest_hook(self, db) -> None:
+        """SDK pattern: hook at t=100 with pid=11; statusline at t=110 with
+        pid=99 (relay's wrong pid). After replay, the v2 statusline row's
+        pid should be 11.
+        """
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=11, cwd="/proj", received_at=100.0
+        )
+        await self._seed_v1_statusline(
+            db, session_id="s1", pid=99, received_at=110.0, project_dir="/proj"
+        )
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid, cwd FROM claude_log_statuslines WHERE session_id='s1'"
+        )
+        row = dict(await cursor.fetchone())
+        assert row["pid"] == 11
+        assert row["cwd"] == "/proj"
+
+    async def test_picks_closest_when_multiple_hook_pids_share_cwd(self, db) -> None:
+        """When the session has multiple hook pids in the same cwd over time
+        (resumes), each statusline aligns to the temporally-closest one."""
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=11, cwd="/proj", received_at=100.0
+        )
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=22, cwd="/proj", received_at=500.0
+        )
+        # Statusline near pid=11
+        await self._seed_v1_statusline(
+            db, session_id="s1", pid=99, received_at=110.0, project_dir="/proj"
+        )
+        # Statusline near pid=22
+        await self._seed_v1_statusline(
+            db, session_id="s1", pid=88, received_at=510.0, project_dir="/proj"
+        )
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid FROM claude_log_statuslines WHERE session_id='s1' "
+            "ORDER BY received_at"
+        )
+        pids = [r["pid"] for r in await cursor.fetchall()]
+        assert pids == [11, 22]
+
+    async def test_leaves_pid_unchanged_when_no_hook_in_session(self, db) -> None:
+        """Session with statuslines but no hooks (rare/unexpected) gets no
+        normalization signal — original pid is preserved."""
+        await self._seed_v1_statusline(
+            db, session_id="lonely", pid=42, received_at=100.0, project_dir="/proj"
+        )
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid FROM claude_log_statuslines WHERE session_id='lonely'"
+        )
+        row = await cursor.fetchone()
+        assert row["pid"] == 42  # original
+
+    async def test_leaves_pid_unchanged_when_cwd_doesnt_match(self, db) -> None:
+        """If no hook in the session shares the statusline's cwd, no
+        realignment — keep the relay's pid."""
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=11, cwd="/other-dir", received_at=100.0
+        )
+        await self._seed_v1_statusline(
+            db, session_id="s1", pid=99, received_at=110.0, project_dir="/proj"
+        )
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid FROM claude_log_statuslines WHERE session_id='s1'"
+        )
+        row = await cursor.fetchone()
+        assert row["pid"] == 99  # cwd didn't match, preserved
+
+    async def test_pure_cli_statusline_pid_already_matches_no_change(self, db) -> None:
+        """Pure CLI: hook and statusline already share pid. Realignment is
+        a no-op (closest hook's pid IS the statusline's pid)."""
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=11, cwd="/proj", received_at=100.0
+        )
+        await self._seed_v1_statusline(
+            db, session_id="s1", pid=11, received_at=110.0, project_dir="/proj"
+        )
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid FROM claude_log_statuslines WHERE session_id='s1'"
+        )
+        row = await cursor.fetchone()
+        assert row["pid"] == 11
+
+    async def test_raw_payload_preserved_after_realignment(self, db) -> None:
+        """raw_payload must be the original bytes, not the rewritten one."""
+        original_payload = {
+            "session_id": "s1",
+            "pid": 99,
+            "source_system": "host",
+            "workspace": {"project_dir": "/proj"},
+        }
+        original_json = json.dumps(original_payload)
+        await self._seed_v1_hook(
+            db, session_id="s1", pid=11, cwd="/proj", received_at=100.0
+        )
+        await db.execute(
+            "INSERT INTO claude_statusline (session_id, received_at, "
+            "raw_payload) VALUES (?, ?, ?)",
+            ("s1", 110.0, original_json),
+        )
+        await db.commit()
+
+        await schema.replay_v1_to_v2_logs(db)
+
+        cursor = await db.execute(
+            "SELECT pid, raw_payload FROM claude_log_statuslines "
+            "WHERE session_id='s1'"
+        )
+        row = dict(await cursor.fetchone())
+        assert row["pid"] == 11  # column is the realigned pid
+        assert row["raw_payload"] == original_json  # bytes are the original
