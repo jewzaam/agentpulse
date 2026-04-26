@@ -342,13 +342,13 @@ class TestInsertLogHook:
             "permission_mode": "acceptEdits",
             "claude_version": "2.1.117",
         }
-        ok = await schema.insert_log_hook(
+        log_id = await schema.insert_log_hook(
             db,
             payload=payload,
             received_at=100.0,
             received_by="hook-endpoint",
         )
-        assert ok is True
+        assert isinstance(log_id, int) and log_id > 0
 
         cursor = await db.execute("SELECT * FROM claude_log_hooks")
         row = await cursor.fetchone()
@@ -363,15 +363,15 @@ class TestInsertLogHook:
         assert row["claude_version"] == "2.1.117"
         assert row["received_by"] == "hook-endpoint"
 
-    async def test_returns_false_without_pid(self, db) -> None:
+    async def test_returns_none_without_pid(self, db) -> None:
         payload = {"session_id": "s1", "hook_event_name": "Stop"}
-        ok = await schema.insert_log_hook(
+        log_id = await schema.insert_log_hook(
             db,
             payload=payload,
             received_at=100.0,
             received_by="hook-endpoint",
         )
-        assert ok is False
+        assert log_id is None
 
         cursor = await db.execute("SELECT count(*) AS n FROM claude_log_hooks")
         row = await cursor.fetchone()
@@ -445,13 +445,13 @@ class TestInsertLogStatusline:
             },
             "exceeds_200k_tokens": False,
         }
-        ok = await schema.insert_log_statusline(
+        log_id = await schema.insert_log_statusline(
             db,
             payload=payload,
             received_at=100.0,
             received_by="statusline-endpoint",
         )
-        assert ok is True
+        assert isinstance(log_id, int) and log_id > 0
 
         cursor = await db.execute("SELECT * FROM claude_log_statuslines")
         row = await cursor.fetchone()
@@ -471,15 +471,15 @@ class TestInsertLogStatusline:
         assert row["lines_added"] == 10
         assert row["received_by"] == "statusline-endpoint"
 
-    async def test_returns_false_without_pid(self, db) -> None:
+    async def test_returns_none_without_pid(self, db) -> None:
         payload = {"session_id": "s1"}
-        ok = await schema.insert_log_statusline(
+        log_id = await schema.insert_log_statusline(
             db,
             payload=payload,
             received_at=100.0,
             received_by="statusline-endpoint",
         )
-        assert ok is False
+        assert log_id is None
 
     async def test_raw_payload_preserved_when_passed(self, db) -> None:
         """The migration path passes original raw_payload bytes for provenance."""
