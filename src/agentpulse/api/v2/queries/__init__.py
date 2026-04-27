@@ -25,6 +25,8 @@ from agentpulse.api.v2.queries.sessions import (
     get_session_by_id,
     get_session_epochs,
     get_sessions,
+    session_today_cost,
+    session_total_cost,
 )
 
 __all__ = [
@@ -38,4 +40,6 @@ __all__ = [
     "get_session_by_id",
     "get_session_epochs",
     "get_sessions",
+    "session_today_cost",
+    "session_total_cost",
 ]

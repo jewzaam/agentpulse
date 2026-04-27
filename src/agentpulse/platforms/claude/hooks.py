@@ -13,7 +13,7 @@ from agentpulse.api.v2.events import (
     broadcast_hook_logged,
     broadcast_statusline_logged,
 )
-from agentpulse.api.v2.queries import IdEnricher
+from agentpulse.api.v2.queries import IdEnricher, session_today_cost, session_total_cost
 from agentpulse.db import get_db
 from agentpulse.events import (
     broadcast_hook_event,
@@ -386,6 +386,12 @@ async def receive_statusline(body: dict, request: Request) -> dict:
             source_system=source_system,
             cwd=cwd,
         )
+        # Derived session totals — computed *after* the v2 insert so they
+        # include this row. Lets clients update per-session cost live
+        # without a REST round-trip after `claude --resume` resets the
+        # per-process `cost_usd` to $0 in the new pid.
+        session_total = await session_total_cost(db, session_id=session_id)
+        session_today = await session_today_cost(db, session_id=session_id)
         await broadcast_statusline_logged(
             log_id=v2_log_id,
             process_id=process_id,
@@ -399,6 +405,8 @@ async def receive_statusline(body: dict, request: Request) -> dict:
             model_name=model_name,
             claude_version=body.get("version") or None,
             cost_usd=cost_usd,
+            session_total_cost_usd=session_total,
+            session_today_cost_usd=session_today,
             total_input_tokens=total_input_tokens,
             total_output_tokens=total_output_tokens,
             context_used_pct=context_used_pct,

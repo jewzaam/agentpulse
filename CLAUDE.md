@@ -151,7 +151,13 @@ have `session_id`.
   dispatch on `event_name` (`SessionStart`, `PreToolUse`, `Stop`, etc.)
   for the typed signal they want.
 - `statusline_logged` — every row in `claude_log_statuslines`. Cost,
-  context, model, etc., plus derived ids and `log_id`.
+  context, model, etc., plus derived ids and `log_id`. Includes
+  `session_total_cost_usd` (server-derived sum across all instance
+  windows in the session, including this row) and
+  `session_today_cost_usd` (the today portion in server local time)
+  so clients can update per-session totals live without REST refetch
+  when `cost_usd` resets on `claude --resume`. The full `cost_by_day`
+  map is **not** on the wire — fetch from REST on a coarse cadence.
 - `pid_death_logged` — every row in `claude_log_pid_deaths`.
   Process-scoped (no session_id/epoch_id). Client action: mark every
   session under `process_id` as ended.

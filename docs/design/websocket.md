@@ -167,6 +167,8 @@ the `StatuslineResponse` REST projection (`api.md`) plus envelope.
   "model_name": "Opus 4.7 (1M context)",
   "claude_version": "2.1.117",
   "cost_usd": 83.58,
+  "session_total_cost_usd": 142.91,
+  "session_today_cost_usd": 12.34,
   "total_input_tokens": 292478,
   "total_output_tokens": 512427,
   "context_used_pct": 6,
@@ -189,10 +191,24 @@ Important behaviors:
 - **`cost_usd` is process-cumulative**, not session-cumulative.
   Persists across `/clear` within one process, resets on
   `claude --resume` into a new process.
-- **No `cost_by_day` field on this message.** Daily breakdown is a
-  derived view available at `GET /api/v2/processes/{process_id}`
-  (in the process body). Clients that need daily totals refetch on
-  a coarse cadence; the per-statusline broadcast stays small.
+- **`session_total_cost_usd` is server-derived.** Sum of MAX(`cost_usd`)
+  per process instance in the session, including this row. Lets
+  clients update per-session totals live without a REST round-trip
+  after a resume resets `cost_usd` to $0 in the new pid. Same value
+  the REST `SessionResponse.total_cost_usd` carries — derivation
+  lives in one place server-side.
+- **`session_today_cost_usd` is the today (server local time) bucket**
+  of the same derivation — equivalent to plucking today's key out of
+  `cost_by_day` on the REST `SessionResponse`. Carried as a scalar
+  because today is the only bucket that moves between consecutive
+  statuslines; broadcasting the full historical map would grow
+  unbounded over a long-running session and re-send mostly stale
+  data.
+- **No `cost_by_day` map on this message.** Full daily breakdown is
+  a derived view available at `GET /api/v2/sessions/{id}` (and
+  `GET /api/v2/processes/{process_id}` for the process variant).
+  Clients that need history refetch on a coarse cadence (e.g. once
+  per day at midnight); live updates use `session_today_cost_usd`.
 - **Always broadcast.** A statusline whose `session_id` doesn't yet
   match any hook is still a valid log row and produces a broadcast.
   Consumers tracking sessions by `session_id` may receive a
