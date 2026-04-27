@@ -183,6 +183,100 @@ async def _session_ids_for_process(
     return [r["session_id"] for r in rows]
 
 
+async def _session_cost_baselines(
+    db: aiosqlite.Connection,
+    *,
+    pid: int,
+    source_system: str,
+    cwd: str,
+    after: float | None,
+    until: float | None,
+    window_start: float,
+) -> dict[str, float]:
+    """Per-session inherited cost baseline for a process window.
+
+    For each session this process touches, returns the MAX(cost_usd) from
+    statusline rows that predate ``window_start`` (the process's earliest
+    activity). This is the cost the session had already accumulated from
+    ANY prior process — the inherited portion that must be subtracted to
+    get this process's contribution.
+
+    Uses ``window_start`` (earliest activity in the window) rather than
+    the PID's prior_death_observed_at because a resumed session typically
+    comes from a *different* PID whose death boundary is irrelevant.
+
+    Returns 0.0 for a session's first process instance (no prior rows).
+    """
+    after_v, until_v = _bounds(after, until)
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT session_id FROM claude_log_statuslines
+        WHERE pid = ? AND source_system = ? AND cwd = ?
+              AND received_at > ? AND received_at <= ?
+              AND cost_usd IS NOT NULL
+        """,
+        (pid, source_system, cwd, after_v, until_v),
+    )
+    session_ids = [r["session_id"] for r in await cursor.fetchall()]
+
+    baselines: dict[str, float] = {}
+    for sid in session_ids:
+        cursor = await db.execute(
+            """
+            SELECT MAX(cost_usd) AS m FROM claude_log_statuslines
+            WHERE session_id = ? AND received_at < ?
+                  AND cost_usd IS NOT NULL
+            """,
+            (sid, window_start),
+        )
+        row = await cursor.fetchone()
+        baselines[sid] = float(row["m"]) if row and row["m"] is not None else 0.0
+    return baselines
+
+
+async def _process_cost(
+    db: aiosqlite.Connection,
+    *,
+    pid: int,
+    source_system: str,
+    cwd: str,
+    after: float | None,
+    until: float | None,
+    window_start: float,
+) -> float:
+    """Total cost attributable to this process instance.
+
+    For each session the process serves: MAX(cost_usd in window) minus the
+    session's baseline (inherited cost from prior instances). Summed across
+    all sessions.
+    """
+    after_v, until_v = _bounds(after, until)
+    baselines = await _session_cost_baselines(
+        db,
+        pid=pid,
+        source_system=source_system,
+        cwd=cwd,
+        after=after,
+        until=until,
+        window_start=window_start,
+    )
+    total = 0.0
+    for sid, baseline in baselines.items():
+        cursor = await db.execute(
+            """
+            SELECT MAX(cost_usd) AS m FROM claude_log_statuslines
+            WHERE session_id = ? AND pid = ? AND source_system = ? AND cwd = ?
+                  AND received_at > ? AND received_at <= ?
+                  AND cost_usd IS NOT NULL
+            """,
+            (sid, pid, source_system, cwd, after_v, until_v),
+        )
+        row = await cursor.fetchone()
+        if row and row["m"] is not None:
+            total += float(row["m"]) - baseline
+    return round(total, 6)
+
+
 async def _cost_by_day(
     db: aiosqlite.Connection,
     *,
@@ -191,36 +285,47 @@ async def _cost_by_day(
     cwd: str,
     after: float | None,
     until: float | None,
+    window_start: float,
 ) -> dict[str, float]:
-    """Per-day cost increment derived from cumulative cost_usd statuslines.
+    """Per-day cost attributable to this process instance.
 
-    cost_usd is monotonic over a process instance's lifetime (resets on
-    PID reuse, hence the per-window scoping). The day's increment is
-    `MAX(cost_usd today) - MAX(cost_usd through yesterday)`. Server local
-    time determines day buckets per database.md.
+    Claude Code's cost_usd is session-cumulative (carries across
+    ``--resume``). For each session in this window, daily deltas start
+    from the session's baseline (inherited cost from prior instances),
+    not from zero. Summed across sessions per day.
     """
     after_v, until_v = _bounds(after, until)
-    cursor = await db.execute(
-        """
-        SELECT date(received_at, 'unixepoch', 'localtime') AS day,
-               MAX(cost_usd) AS day_max
-        FROM claude_log_statuslines
-        WHERE pid = ? AND source_system = ? AND cwd = ?
-              AND cost_usd IS NOT NULL
-              AND received_at > ? AND received_at <= ?
-        GROUP BY day
-        ORDER BY day
-        """,
-        (pid, source_system, cwd, after_v, until_v),
+    baselines = await _session_cost_baselines(
+        db,
+        pid=pid,
+        source_system=source_system,
+        cwd=cwd,
+        after=after,
+        until=until,
+        window_start=window_start,
     )
-    rows = [dict(r) for r in await cursor.fetchall()]
     out: dict[str, float] = {}
-    prev = 0.0
-    for r in rows:
-        day_max = float(r["day_max"]) if r["day_max"] is not None else prev
-        out[r["day"]] = round(day_max - prev, 6)
-        prev = day_max
-    return out
+    for sid, baseline in baselines.items():
+        cursor = await db.execute(
+            """
+            SELECT date(received_at, 'unixepoch', 'localtime') AS day,
+                   MAX(cost_usd) AS day_max
+            FROM claude_log_statuslines
+            WHERE session_id = ? AND pid = ? AND source_system = ? AND cwd = ?
+                  AND cost_usd IS NOT NULL
+                  AND received_at > ? AND received_at <= ?
+            GROUP BY day
+            ORDER BY day
+            """,
+            (sid, pid, source_system, cwd, after_v, until_v),
+        )
+        prev = baseline
+        for r in await cursor.fetchall():
+            day_max = float(r["day_max"]) if r["day_max"] is not None else prev
+            delta = day_max - prev
+            out[r["day"]] = out.get(r["day"], 0.0) + delta
+            prev = day_max
+    return {d: round(v, 6) for d, v in out.items()}
 
 
 async def _derive_process(
@@ -303,7 +408,22 @@ async def _derive_process(
         db, pid=pid, source_system=source_system, cwd=cwd, after=after, until=until
     )
     cost_by_day = await _cost_by_day(
-        db, pid=pid, source_system=source_system, cwd=cwd, after=after, until=until
+        db,
+        pid=pid,
+        source_system=source_system,
+        cwd=cwd,
+        after=after,
+        until=until,
+        window_start=started_at,
+    )
+    cost_usd = await _process_cost(
+        db,
+        pid=pid,
+        source_system=source_system,
+        cwd=cwd,
+        after=after,
+        until=until,
+        window_start=started_at,
     )
 
     pid_alive = ended_at is None
@@ -324,7 +444,7 @@ async def _derive_process(
         "pid_alive": pid_alive,
         "current_session_id": current_session_id,
         "derived_state": derived_state,
-        "cost_usd": sl_win.get("cost_usd"),
+        "cost_usd": cost_usd,
         "cost_by_day": cost_by_day,
         "total_input_tokens": (latest_sl or {}).get("total_input_tokens"),
         "total_output_tokens": (latest_sl or {}).get("total_output_tokens"),

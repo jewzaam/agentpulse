@@ -121,6 +121,12 @@ src/agentpulse/
   broadcast. Consumers should be able to build the same view from either source.
 - **Config file is the only configuration source** — no env vars. Both the service
   (`--config`) and the hook relay (`--config`) read the same file.
+- **cost_usd is session-cumulative** — Claude Code's `total_cost_usd` in
+  statusline payloads never resets for a given `session_id`, even across
+  `--resume` (new PID). The latest statusline row always holds the true
+  session total. Session cost = `MAX(cost_usd)` across all rows. Process
+  cost = `MAX - baseline`, where baseline is the session's cost before
+  that process started. Do not SUM per-instance MAXes.
 - **Limits fetching is optional** — `fetch_limits: true` enables OAuth API calls.
   When false, completely inert (no token read, no API call). Inert on Vertex.
 
@@ -152,12 +158,11 @@ have `session_id`.
   for the typed signal they want.
 - `statusline_logged` — every row in `claude_log_statuslines`. Cost,
   context, model, etc., plus derived ids and `log_id`. Includes
-  `session_total_cost_usd` (server-derived sum across all instance
-  windows in the session, including this row) and
-  `session_today_cost_usd` (the today portion in server local time)
-  so clients can update per-session totals live without REST refetch
-  when `cost_usd` resets on `claude --resume`. The full `cost_by_day`
-  map is **not** on the wire — fetch from REST on a coarse cadence.
+  `session_total_cost_usd` (server-derived global MAX(cost_usd) for
+  the session, including this row) and `session_today_cost_usd` (the
+  today delta in server local time) so clients can update per-session
+  totals live. The full `cost_by_day` map is **not** on the wire —
+  fetch from REST on a coarse cadence.
 - `pid_death_logged` — every row in `claude_log_pid_deaths`.
   Process-scoped (no session_id/epoch_id). Client action: mark every
   session under `process_id` as ended.
