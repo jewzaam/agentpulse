@@ -20,6 +20,7 @@ from agentpulse.db import close_db, init_db
 from agentpulse.platforms.claude.discovery import run_discovery_tick
 from agentpulse.platforms.claude.hooks import router as hooks_router
 from agentpulse.platforms.claude.pid_watcher import run_pid_watcher_tick
+from agentpulse.ui import router as ui_router
 from agentpulse.websocket import router as ws_router
 
 SERVICE_PIDFILE_NAME = "agentpulse"
@@ -138,4 +139,5 @@ def create_app() -> FastAPI:
     app.include_router(v2_router)
     app.include_router(v2_ws_router)
     app.include_router(ws_router)
+    app.include_router(ui_router)
     return app
