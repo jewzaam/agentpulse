@@ -120,14 +120,32 @@ process's `cost_usd`, `total_input_tokens`, `total_output_tokens`,
 `lines_added`, `lines_removed`. Replace the session's
 `context_used_pct` and `model_name`.
 
-`cost_usd` is **process-cumulative**, not session-cumulative.
+`cost_usd` is **process-cumulative**, not session-cumulative — it
+resets to $0 in a new pid after `claude --resume`.
 
-`cost_by_day` is **not on the wire** — it's derived. If you need
-daily breakdown, GET the process body on a coarse cadence:
+`session_total_cost_usd` is the **session-cumulative** total derived
+server-side (sum across all instance windows in the session,
+including this row). Replace the session's running total with this
+value — no client-side aggregation, no REST refetch on resume. Same
+field as `SessionResponse.total_cost_usd` from REST.
+
+`session_today_cost_usd` is **today's bucket** (server local time)
+of the session cost. Same value the client would derive by plucking
+today's key from `cost_by_day` on REST. Drives the "spend so far
+today" indicator without forcing the client to track yesterday's
+total or refetch at midnight.
+
+`cost_by_day` is **not on the wire** — sending the full map on every
+statusline would grow unbounded for long-running sessions. If you
+need historical breakdown, refetch on a coarse cadence:
 
 ```
-GET /api/v2/processes/{process_id}    # has cost_by_day
+GET /api/v2/sessions/{session_id}     # has cost_by_day
+GET /api/v2/processes/{process_id}    # has cost_by_day for the process
 ```
+
+A reasonable cadence is once per day shortly after midnight — that's
+when yesterday's bucket finalizes and a new today bucket appears.
 
 A `statusline_logged` may arrive for a session_id with no prior
 `hook_logged` (statusline can race ahead of hooks). Create a
@@ -248,6 +266,9 @@ server logs them, doesn't broadcast). The
 
 - **Don't accumulate `cost_usd`** across `statusline_logged`
   frames. It's cumulative; replace.
+- **Don't sum `cost_usd` across processes** to get a session total.
+  Use `session_total_cost_usd` from the same frame — the server
+  already did the instance-windowed aggregation correctly.
 - **Don't compute `process_id` yourself.** It's an opaque
   server-derived hash. Echo what the server gives you.
 - **Don't rely on `event_name` for cleanup.** When

@@ -242,7 +242,7 @@ async def _derive_session(db: aiosqlite.Connection, *, session_id: str) -> dict 
     row = await cursor.fetchone()
     epoch_count = int(row["n"]) if row else 0
 
-    total_cost_usd = await _session_total_cost(db, session_id=session_id)
+    total_cost_usd = await session_total_cost(db, session_id=session_id)
     cost_by_day = await _session_cost_by_day(db, session_id=session_id)
 
     return {
@@ -313,13 +313,17 @@ async def _session_process_instances(
     return instances
 
 
-async def _session_total_cost(db: aiosqlite.Connection, *, session_id: str) -> float:
+async def session_total_cost(db: aiosqlite.Connection, *, session_id: str) -> float:
     """Sum of MAX(cost_usd) per process instance in the session.
 
     Instance-windowed grouping handles PID reuse: a tuple that died and was
     reused yields two instances, each contributing its own MAX. Without
     windowing, one MAX would capture only the higher of the two counters
     and silently undercount the session total.
+
+    Public so the statusline broadcast path can compute the same derived
+    value the REST `SessionResponse.total_cost_usd` carries — keeps the
+    derivation in one place.
     """
     instances = await _session_process_instances(db, session_id=session_id)
     total = 0.0
@@ -350,6 +354,22 @@ async def _session_total_cost(db: aiosqlite.Connection, *, session_id: str) -> f
         if row is not None and row["m"] is not None:
             total += float(row["m"])
     return round(total, 6)
+
+
+async def session_today_cost(db: aiosqlite.Connection, *, session_id: str) -> float:
+    """Today's portion of the session cost (server local time).
+
+    Same value the client would derive by plucking today's key out of
+    `cost_by_day` on the REST `SessionResponse`. Public so the statusline
+    broadcast can carry the live "today" scalar without forcing clients
+    to track yesterday's total themselves or refetch REST at midnight.
+
+    Returns 0.0 when the session has no cost data yet today.
+    """
+    from datetime import date
+
+    by_day = await _session_cost_by_day(db, session_id=session_id)
+    return by_day.get(date.today().isoformat(), 0.0)
 
 
 async def _session_cost_by_day(

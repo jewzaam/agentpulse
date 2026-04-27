@@ -178,6 +178,8 @@ class TestStatuslineLoggedBroadcast:
             assert frame["model_name"] == "Opus 4.7 (1M context)"
             assert frame["claude_version"] == "2.1.117"
             assert frame["cost_usd"] == 1.25
+            assert frame["session_total_cost_usd"] == pytest.approx(1.25)
+            assert frame["session_today_cost_usd"] == pytest.approx(1.25)
             assert frame["duration_seconds"] == 60.0
             assert frame["api_duration_seconds"] == 12.0
             assert frame["cache_read_tokens"] == 800
@@ -187,6 +189,69 @@ class TestStatuslineLoggedBroadcast:
             assert isinstance(frame["epoch_id"], str) and len(frame["epoch_id"]) == 16
             assert frame["log_id"] == 1
             assert "raw_payload" not in frame
+
+    def test_session_total_cost_usd_sums_across_processes(self, client) -> None:
+        """The broadcast carries the derived session-wide total, not just
+        this process's cost_usd. Lets clients update session totals live
+        without re-fetching REST after a `claude --resume` into a new pid.
+        """
+        # First statusline: pid=10, cost=2.0 → session total = 2.0
+        first = {
+            "session_id": "s1",
+            "pid": 10,
+            "source_system": "host",
+            "cwd": "/proj",
+            "cost": {"total_cost_usd": 2.0},
+        }
+        # Second statusline: same session, new pid (resume), cost=1.5 →
+        # session total = 2.0 + 1.5 = 3.5
+        second = {
+            "session_id": "s1",
+            "pid": 20,
+            "source_system": "host",
+            "cwd": "/proj",
+            "cost": {"total_cost_usd": 1.5},
+        }
+        with client.websocket_connect("/ws/v2") as ws:
+            client.post("/statusline/claude", json=first)
+            frame1 = ws.receive_json()
+            assert frame1["cost_usd"] == 2.0
+            assert frame1["session_total_cost_usd"] == pytest.approx(2.0)
+
+            client.post("/statusline/claude", json=second)
+            frame2 = ws.receive_json()
+            assert frame2["cost_usd"] == 1.5
+            assert frame2["session_total_cost_usd"] == pytest.approx(3.5)
+
+    def test_session_today_cost_usd_tracks_today_bucket(self, client) -> None:
+        """`session_today_cost_usd` is just the today portion of the session
+        total — same value the client would derive by plucking today's
+        key from `cost_by_day` on REST. Two same-day statuslines into
+        different processes should sum their today contribution.
+        """
+        first = {
+            "session_id": "s1",
+            "pid": 10,
+            "source_system": "host",
+            "cwd": "/proj",
+            "cost": {"total_cost_usd": 2.0},
+        }
+        second = {
+            "session_id": "s1",
+            "pid": 20,
+            "source_system": "host",
+            "cwd": "/proj",
+            "cost": {"total_cost_usd": 1.5},
+        }
+        with client.websocket_connect("/ws/v2") as ws:
+            client.post("/statusline/claude", json=first)
+            frame1 = ws.receive_json()
+            assert frame1["session_today_cost_usd"] == pytest.approx(2.0)
+
+            client.post("/statusline/claude", json=second)
+            frame2 = ws.receive_json()
+            # Both statuslines arrive same wall-clock day on the server
+            assert frame2["session_today_cost_usd"] == pytest.approx(3.5)
 
     def test_pidless_statusline_does_not_broadcast(self, client) -> None:
         no_pid = {

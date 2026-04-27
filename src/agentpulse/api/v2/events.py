@@ -154,6 +154,8 @@ async def broadcast_statusline_logged(
     model_name: str | None,
     claude_version: str | None,
     cost_usd: float | None,
+    session_total_cost_usd: float,
+    session_today_cost_usd: float,
     total_input_tokens: int | None,
     total_output_tokens: int | None,
     context_used_pct: float | None,
@@ -168,7 +170,20 @@ async def broadcast_statusline_logged(
     received_at: float,
     received_by: str,
 ) -> None:
-    """One row in claude_log_statuslines → one frame on /ws/v2."""
+    """One row in claude_log_statuslines → one frame on /ws/v2.
+
+    `session_total_cost_usd` is server-derived (sum of MAX(cost_usd) per
+    process instance in the session, including this row). Lets clients
+    update the per-session total live without re-fetching REST after a
+    `claude --resume` resets the per-process `cost_usd` counter.
+
+    `session_today_cost_usd` is the today (server local time) bucket of
+    the same derivation — same value the client would get by plucking
+    today's key out of `cost_by_day` on the REST `SessionResponse`. The
+    full daily map is intentionally NOT on the wire (unbounded growth
+    for long-running sessions); today's scalar is the only bucket that
+    moves between consecutive statuslines.
+    """
     logger.debug("broadcast statusline_logged log_id=%d session=%s", log_id, session_id)
     await manager.broadcast(
         {
@@ -186,6 +201,8 @@ async def broadcast_statusline_logged(
             "model_name": model_name,
             "claude_version": claude_version,
             "cost_usd": cost_usd,
+            "session_total_cost_usd": session_total_cost_usd,
+            "session_today_cost_usd": session_today_cost_usd,
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "context_used_pct": context_used_pct,
