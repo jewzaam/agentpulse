@@ -36,8 +36,7 @@ PAGE_HTML = """\
 </head>
 <body>
 <h1>Costs</h1>
-<p class="sub">Per-day Claude Code spend recorded by AgentPulse.
-Daily totals derived from per-process cost deltas.</p>
+<p class="sub">Per-day Claude Code activity and spend recorded by AgentPulse.</p>
 
 <h2>By day</h2>
 <div id="by-day"><p class="empty">Loading...</p></div>
@@ -60,14 +59,13 @@ function el(tag, opts) {
 function fmtUsd(n) { return "$" + n.toFixed(4); }
 function fmtInt(n) { return (n || 0).toLocaleString(); }
 
-const COST_HEADERS = ["Cost (USD)", "Input", "Output", "Cache read", "Cache create"];
+const HEADERS = ["Sessions", "Messages", "Tokens", "Cost (USD)"];
 
 function appendNumericCells(tr, r) {
+  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.session_count) }));
+  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.message_count) }));
+  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.total_tokens) }));
   tr.appendChild(el("td", { cls: "num", text: fmtUsd(r.total_cost_usd) }));
-  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.input_tokens) }));
-  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.output_tokens) }));
-  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.cache_read_tokens) }));
-  tr.appendChild(el("td", { cls: "num", text: fmtInt(r.cache_creation_tokens) }));
 }
 
 function emptyMsg(msg) {
@@ -80,17 +78,16 @@ function buildByDayTable(rows) {
   const thead = el("thead");
   const headRow = el("tr");
   headRow.appendChild(el("th", { text: "Day" }));
-  for (const h of COST_HEADERS) headRow.appendChild(el("th", { text: h }));
+  for (const h of HEADERS) headRow.appendChild(el("th", { text: h }));
   thead.appendChild(headRow);
   table.appendChild(thead);
 
   const tbody = el("tbody");
   const totals = {
+    session_count: 0,
+    message_count: 0,
+    total_tokens: 0,
     total_cost_usd: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_creation_tokens: 0,
   };
   for (const r of rows) {
     for (const k of Object.keys(totals)) totals[k] += r[k] || 0;
@@ -118,7 +115,7 @@ function buildByDayCwdGroup(day, dayRows) {
   const thead = el("thead");
   const headRow = el("tr");
   headRow.appendChild(el("th", { text: "Working directory" }));
-  for (const h of COST_HEADERS) headRow.appendChild(el("th", { text: h }));
+  for (const h of HEADERS) headRow.appendChild(el("th", { text: h }));
   thead.appendChild(headRow);
   table.appendChild(thead);
 
