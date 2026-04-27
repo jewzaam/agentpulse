@@ -21,6 +21,20 @@ def _build_where(filters: list[tuple[str, object]]) -> tuple[str, list[object]]:
     return where, params
 
 
+def _order_clause(order: str) -> str:
+    """Validate `order` and return the SQL fragment for ORDER BY id.
+
+    SQL ORDER BY direction can't be parameterized — the value is
+    interpolated into the query string. Strict whitelist guards
+    against injection.
+    """
+    if order == "asc":
+        return "ORDER BY id ASC"
+    if order == "desc":
+        return "ORDER BY id DESC"
+    raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
+
+
 async def get_log_hooks(
     db: aiosqlite.Connection,
     *,
@@ -35,8 +49,10 @@ async def get_log_hooks(
     tool_name: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    order: str = "asc",
 ) -> list[dict]:
-    """Filtered + paginated read of claude_log_hooks. Ordered by id ASC."""
+    """Filtered + paginated read of claude_log_hooks. Ordered by id; pass
+    `order="desc"` for newest-first."""
     where, params = _build_where(
         [
             ("received_at >= ?", since),
@@ -50,7 +66,10 @@ async def get_log_hooks(
             ("tool_name = ?", tool_name),
         ]
     )
-    sql = f"SELECT * FROM claude_log_hooks {where} ORDER BY id LIMIT ? OFFSET ?"
+    sql = (
+        f"SELECT * FROM claude_log_hooks {where} {_order_clause(order)} "
+        f"LIMIT ? OFFSET ?"
+    )
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
@@ -67,8 +86,10 @@ async def get_log_statuslines(
     cwd: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    order: str = "asc",
 ) -> list[dict]:
-    """Filtered + paginated read of claude_log_statuslines. Ordered by id ASC."""
+    """Filtered + paginated read of claude_log_statuslines. Ordered by id;
+    pass `order="desc"` for newest-first."""
     where, params = _build_where(
         [
             ("received_at >= ?", since),
@@ -79,7 +100,10 @@ async def get_log_statuslines(
             ("cwd = ?", cwd),
         ]
     )
-    sql = f"SELECT * FROM claude_log_statuslines {where} ORDER BY id LIMIT ? OFFSET ?"
+    sql = (
+        f"SELECT * FROM claude_log_statuslines {where} {_order_clause(order)} "
+        f"LIMIT ? OFFSET ?"
+    )
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
@@ -95,8 +119,10 @@ async def get_log_pid_deaths(
     cwd: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    order: str = "asc",
 ) -> list[dict]:
-    """Filtered + paginated read of claude_log_pid_deaths. Ordered by id ASC.
+    """Filtered + paginated read of claude_log_pid_deaths. Ordered by id;
+    pass `order="desc"` for newest-first.
 
     Time bounds apply to observed_at (the watcher-observation timestamp),
     not received_at — pid-deaths are observation-sourced, not wire-sourced.
@@ -110,7 +136,10 @@ async def get_log_pid_deaths(
             ("cwd = ?", cwd),
         ]
     )
-    sql = f"SELECT * FROM claude_log_pid_deaths {where} ORDER BY id LIMIT ? OFFSET ?"
+    sql = (
+        f"SELECT * FROM claude_log_pid_deaths {where} {_order_clause(order)} "
+        f"LIMIT ? OFFSET ?"
+    )
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
@@ -123,8 +152,11 @@ async def get_log_api_limits(
     until: float | None = None,
     limit: int = 100,
     offset: int = 0,
+    order: str = "asc",
 ) -> list[dict]:
-    """Filtered + paginated read of claude_log_api_limits. Ordered by id ASC.
+    """Filtered + paginated read of claude_log_api_limits. Ordered by id;
+    pass `order="desc"` for newest-first (use `order=desc&limit=1` to fetch
+    the latest snapshot).
 
     Account-scoped — no pid/source_system/cwd filters. since/until bound
     received_at.
@@ -135,7 +167,10 @@ async def get_log_api_limits(
             ("received_at <= ?", until),
         ]
     )
-    sql = f"SELECT * FROM claude_log_api_limits {where} ORDER BY id LIMIT ? OFFSET ?"
+    sql = (
+        f"SELECT * FROM claude_log_api_limits {where} {_order_clause(order)} "
+        f"LIMIT ? OFFSET ?"
+    )
     cursor = await db.execute(sql, [*params, limit, offset])
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]

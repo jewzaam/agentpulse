@@ -88,8 +88,8 @@ also broadcasts one `api_limits_logged` WebSocket frame.
 
 When `fetch_limits` is false, the loop is fully inert: no OAuth
 token is read, no API call is made, no row is written. Clients see
-404 / 503 from `/api/v2/limits` and no `api_limits_logged`
-broadcasts.
+empty results from `/api/v2/log/api-limits` and no
+`api_limits_logged` broadcasts.
 
 ### Producer principles
 
@@ -118,7 +118,7 @@ A new consumer wants the current state of the world.
 3. **Optional drilldowns** if the client renders detail:
    - `GET /api/v2/processes/{process_id}` — sessions, epochs nested
    - `GET /api/v2/sessions/{session_id}` — agents, epochs nested
-4. **Optional limits**: `GET /api/v2/limits`.
+4. **Optional limits**: `GET /api/v2/log/api-limits?order=desc&limit=1` (latest row).
 5. **Apply buffered frames + subsequent live frames**.
 
 The "buffer then drain" pattern avoids the race where a frame

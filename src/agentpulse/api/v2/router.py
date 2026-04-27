@@ -198,6 +198,7 @@ async def list_log_hooks(
     tool_name: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> list[EventResponse]:
     db = await get_db()
     rows = await queries.get_log_hooks(
@@ -213,6 +214,7 @@ async def list_log_hooks(
         tool_name=tool_name,
         limit=limit,
         offset=offset,
+        order=order,
     )
     enricher = queries.IdEnricher(db)
     out: list[EventResponse] = []
@@ -264,6 +266,7 @@ async def list_log_statuslines(
     cwd: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> list[StatuslineResponse]:
     db = await get_db()
     rows = await queries.get_log_statuslines(
@@ -276,6 +279,7 @@ async def list_log_statuslines(
         cwd=cwd,
         limit=limit,
         offset=offset,
+        order=order,
     )
     enricher = queries.IdEnricher(db)
     out: list[StatuslineResponse] = []
@@ -337,6 +341,7 @@ async def list_log_pid_deaths(
     cwd: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> list[PidDeathResponse]:
     """Raw read of claude_log_pid_deaths. since/until bound observed_at."""
     db = await get_db()
@@ -349,6 +354,7 @@ async def list_log_pid_deaths(
         cwd=cwd,
         limit=limit,
         offset=offset,
+        order=order,
     )
     enricher = queries.IdEnricher(db)
     out: list[PidDeathResponse] = []
@@ -385,14 +391,16 @@ async def list_log_api_limits(
     until: float | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> list[ApiLimitsResponse]:
     """Raw read of claude_log_api_limits. Account-scoped — no identity filters.
 
     since/until bound received_at. raw_response is included by default.
+    Use `order=desc&limit=1` to fetch the latest snapshot.
     """
     db = await get_db()
     rows = await queries.get_log_api_limits(
-        db, since=since, until=until, limit=limit, offset=offset
+        db, since=since, until=until, limit=limit, offset=offset, order=order
     )
     return [
         ApiLimitsResponse(

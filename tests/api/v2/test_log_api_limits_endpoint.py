@@ -86,3 +86,34 @@ class TestLogApiLimitsEndpoint:
     def test_invalid_limit_returns_422(self, client) -> None:
         resp = client.get("/api/v2/log/api-limits?limit=2000")
         assert resp.status_code == 422
+
+    def test_order_desc_returns_newest_first(self, client, db) -> None:
+        for t in (100.0, 200.0, 300.0):
+            _seed_api_limits(db, received_at=t)
+
+        resp = client.get("/api/v2/log/api-limits?order=desc")
+        body = resp.json()
+        assert [r["received_at"] for r in body] == [300.0, 200.0, 100.0]
+
+    def test_order_desc_with_limit_one_returns_latest(self, client, db) -> None:
+        """The pattern docs recommend for `latest snapshot` reads."""
+        for t in (100.0, 200.0, 300.0):
+            _seed_api_limits(db, received_at=t)
+
+        resp = client.get("/api/v2/log/api-limits?order=desc&limit=1")
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["received_at"] == 300.0
+
+    def test_order_asc_default_unchanged(self, client, db) -> None:
+        """Default behavior stays asc — no breaking change for existing clients."""
+        for t in (100.0, 200.0, 300.0):
+            _seed_api_limits(db, received_at=t)
+
+        resp = client.get("/api/v2/log/api-limits")
+        body = resp.json()
+        assert [r["received_at"] for r in body] == [100.0, 200.0, 300.0]
+
+    def test_invalid_order_returns_422(self, client) -> None:
+        resp = client.get("/api/v2/log/api-limits?order=sideways")
+        assert resp.status_code == 422
