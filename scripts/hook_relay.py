@@ -169,8 +169,7 @@ def main() -> None:
         )
         urllib.request.urlopen(req, timeout=2)
     except Exception:
-        if debug:
-            logger.debug("relay failed", exc_info=True)
+        logger.warning("relay failed url=%s", url, exc_info=True)
 
 
 if __name__ == "__main__":

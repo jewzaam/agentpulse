@@ -97,7 +97,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise
 
     pidfile.set_base_dir(settings.pidfile_dir)
-    pidfile.write_pid(SERVICE_PIDFILE_NAME)
+    try:
+        pidfile.write_pid(SERVICE_PIDFILE_NAME)
+    except OSError:
+        logger.exception(
+            "failed to write pidfile %s",
+            pidfile.pidfile_path(SERVICE_PIDFILE_NAME),
+        )
+        await close_db()
+        raise
     logger.info("wrote pidfile %s", pidfile.pidfile_path(SERVICE_PIDFILE_NAME))
 
     discovery_task = asyncio.create_task(

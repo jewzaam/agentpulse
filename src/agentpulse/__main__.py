@@ -85,13 +85,23 @@ def main() -> int:
     _configure_logging(log_file=settings.log_file, log_level=settings.log_level)
     _install_excepthook(logger=logging.getLogger(__name__))
 
-    uvicorn.run(
-        "agentpulse.app:create_app",
-        factory=True,
-        host=settings.host,
-        port=settings.port,
-        log_level=settings.log_level.lower(),
-    )
+    try:
+        uvicorn.run(
+            "agentpulse.app:create_app",
+            factory=True,
+            host=settings.host,
+            port=settings.port,
+            log_level=settings.log_level.lower(),
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).critical(
+            "service failed host=%s port=%d: %s",
+            settings.host,
+            settings.port,
+            exc,
+            exc_info=True,
+        )
+        return EXIT_ERROR
     return EXIT_SUCCESS
 
 
