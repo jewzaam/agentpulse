@@ -44,7 +44,7 @@ For the upstream Claude Code semantics behind these, see
 ```
 1. Open WebSocket /ws/v2. Buffer frames; don't process yet.
 2. GET /api/v2/processes?active=true   → live processes (sessions nested)
-3. GET /api/v2/limits                  → optional, if you display them
+3. GET /api/v2/log/api-limits?order=desc&limit=1  → optional, if you display them (latest row)
 4. Apply buffered frames + subsequent live frames.
 ```
 
@@ -188,7 +188,7 @@ Less commonly:
 | Drill into one session | `GET /api/v2/sessions/{session_id}` (epochs + agents nested) |
 | Show event history | `GET /api/v2/sessions/{session_id}/events?limit=N` |
 | Show statusline history | `GET /api/v2/sessions/{session_id}/statuslines?limit=N` |
-| Show usage limits | `GET /api/v2/limits` |
+| Show usage limits | `GET /api/v2/log/api-limits?order=desc&limit=1` (latest row) |
 | Reset a stuck session | `POST /api/v2/sessions/{session_id}/clear` |
 
 `POST /sessions/{id}/clear` is the only mutation you'll call. Use
@@ -258,9 +258,9 @@ Display it tentatively; populate the rest on the first
 `api_limits_logged` only fires on successful fetches. If you care
 about staleness, watch the gap between consecutive
 `received_at` values; long gaps may mean fetcher failures (the
-server logs them, doesn't broadcast). The
-[REST `/api/v2/limits`](api.md) response carries `stale` and
-`age_seconds` for explicit checking.
+server logs them, doesn't broadcast). The REST endpoint
+[`/api/v2/log/api-limits?order=desc&limit=1`](api.md) returns the latest row;
+derive staleness as `now() - received_at`.
 
 ## Don't do
 

@@ -97,9 +97,15 @@ opaque.
 | GET    | `/api/v2/agents/{agent_id}` | Agent detail. |
 | GET    | `/api/v2/agents/{agent_id}/events` | Hook events scoped to one agent. |
 | POST   | `/api/v2/sessions/{session_id}/clear` | Insert a synthetic `clear_state` row in `claude_log_hooks` and broadcast `session_cleared`. Used when Claude is interrupted with no events firing. |
-| GET    | `/api/v2/limits` | Latest cached usage-limits snapshot. 404 when disabled or unavailable. |
-| GET    | `/api/v2/limits/history` | Historical limits snapshots. Pagination as above. |
 | GET    | `/api/v2/summary` | Aggregate stats across the running deployment. |
+
+For usage limits, query the raw log endpoint
+`/api/v2/log/api-limits` directly: `?order=desc&limit=1` returns the
+latest snapshot; default `order=asc` returns paginated history
+oldest-first. Account-scoped, no identity filters.
+
+All `/api/v2/log/*` endpoints accept `order=asc|desc` (default `asc`)
+to control row direction. Use `desc` whenever you want newest-first.
 
 ### Raw log streams
 
@@ -359,31 +365,32 @@ Mirrors `claude_log_statuslines` columns one-to-one (plus derived
 }
 ```
 
-### `LimitsResponse` (`/limits`)
+### `ApiLimitsResponse` (`claude_log_api_limits` projection)
 
 ```json
 {
-  "available": true,
-  "fetched_at": 1776052424.367,
-  "age_seconds": 0.0,
-  "stale": false,
-  "refresh_after": 1776052544.367,
-  "five_hour": {
-    "utilization": 11.0,
-    "resets_at_seconds": 1776920400.0,
-    "resets_at": "2026-04-13T07:00:00+00:00"
-  },
-  "seven_day": {
-    "utilization": 8.0,
-    "resets_at_seconds": 1776981600.0,
-    "resets_at": "2026-04-19T13:00:00+00:00"
-  }
+  "id": 27,
+  "platform": "claude",
+  "received_at": 1776052424.367,
+  "received_by": "limits-fetcher",
+  "five_hour_utilization": 11.0,
+  "five_hour_resets_at": 1776920400.0,
+  "seven_day_utilization": 8.0,
+  "seven_day_resets_at": 1776981600.0,
+  "raw_response": "{...}"
 }
 ```
 
-Both `resets_at_seconds` (epoch seconds, our standard unit) and the
-upstream ISO string `resets_at` (passthrough from the OAuth API) are
-returned. Clients should prefer `resets_at_seconds`.
+Fields are the row's columns from `claude_log_api_limits`.
+`*_resets_at` values are Unix epoch seconds (the upstream OAuth API
+returns ISO strings; the inserter normalizes on write). Other
+buckets the broadcast doesn't promote (`seven_day_opus`,
+`seven_day_sonnet`, `extra_usage`) live in `raw_response` only —
+parse there when needed.
+
+Clients computing "is this stale?" derive it from
+`now() - received_at` against whatever freshness threshold they
+need; the row carries no derived staleness fields.
 
 ### `SummaryResponse`
 
@@ -394,7 +401,7 @@ returned. Clients should prefer `resets_at_seconds`.
   "active_agents": 5,
   "active_epochs": 4,
   "state_breakdown": {"working": 2, "idle": 1},
-  "limits": { /* LimitsResponse, or null */ }
+  "limits": { /* ApiLimitsResponse, or null */ }
 }
 ```
 

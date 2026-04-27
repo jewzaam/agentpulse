@@ -265,8 +265,9 @@ account** constraint in `database.md`).
 ```
 
 `*_resets_at` values are seconds. The full upstream response is
-available at `GET /api/v2/limits/history` with `include=raw` when a
-client wants the buckets we don't promote (e.g. `seven_day_opus`).
+available at `GET /api/v2/log/api-limits` (rows include
+`raw_response`) when a client wants the buckets we don't promote
+(e.g. `seven_day_opus`).
 
 This is the only message type with no `process_id` — limits are
 account-scoped, not process-scoped.
@@ -277,7 +278,7 @@ account-scoped, not process-scoped.
 2. Buffer incoming frames.
 3. `GET /api/v2/processes?active=true` — initial process list with
    nested sessions.
-4. `GET /api/v2/limits` if interested.
+4. `GET /api/v2/log/api-limits?order=desc&limit=1` if interested (latest row).
 5. Apply buffered + subsequent broadcasts.
 
 ## Reconnect pattern
