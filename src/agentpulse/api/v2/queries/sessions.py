@@ -14,11 +14,7 @@ from agentpulse.api.v2.queries._helpers import (
     agents_for_session,
     latest_hook_for_session,
 )
-from agentpulse.api.v2.queries._instance import _instance_windows
 from agentpulse.api.v2.state import compute_effective_state, derive_state
-
-_NO_LOWER = -1.0
-_NO_UPPER = 9e18
 
 
 async def _latest_statusline_for_session(
@@ -272,88 +268,24 @@ async def _derive_session(db: aiosqlite.Connection, *, session_id: str) -> dict 
     }
 
 
-async def _session_process_instances(
-    db: aiosqlite.Connection, *, session_id: str
-) -> list[dict]:
-    """Enumerate process instances that contributed to this session.
-
-    For each (pid, source_system, cwd) tuple the session touches, expand
-    into instance windows bounded by claude_log_pid_deaths rows. PID reuse
-    within the same session — same tuple appearing twice in history with a
-    death in between — yields two instances; cost_usd is a fresh counter
-    per process so each must aggregate separately.
-    """
-    cursor = await db.execute(
-        """
-        SELECT DISTINCT pid, source_system, cwd FROM claude_log_statuslines
-        WHERE session_id = ? AND cost_usd IS NOT NULL
-        """,
-        (session_id,),
-    )
-    tuples = await cursor.fetchall()
-
-    instances: list[dict] = []
-    for t in tuples:
-        windows = await _instance_windows(
-            db,
-            pid=t["pid"],
-            source_system=t["source_system"],
-            cwd=t["cwd"],
-        )
-        for w in windows:
-            instances.append(
-                {
-                    "pid": t["pid"],
-                    "source_system": t["source_system"],
-                    "cwd": t["cwd"],
-                    "prior_death_observed_at": w["prior_death_observed_at"],
-                    "ended_at": w["ended_at"],
-                }
-            )
-    return instances
-
-
 async def session_total_cost(db: aiosqlite.Connection, *, session_id: str) -> float:
-    """Sum of MAX(cost_usd) per process instance in the session.
+    """Global MAX(cost_usd) across all statusline rows for the session.
 
-    Instance-windowed grouping handles PID reuse: a tuple that died and was
-    reused yields two instances, each contributing its own MAX. Without
-    windowing, one MAX would capture only the higher of the two counters
-    and silently undercount the session total.
+    Claude Code's cost_usd is session-cumulative — it carries forward
+    across ``--resume`` (new PID inherits the running total). The latest
+    row always holds the highest value, so a single MAX is the true
+    session total. No per-instance windowing needed.
 
     Public so the statusline broadcast path can compute the same derived
-    value the REST `SessionResponse.total_cost_usd` carries — keeps the
-    derivation in one place.
+    value the REST ``SessionResponse.total_cost_usd`` carries.
     """
-    instances = await _session_process_instances(db, session_id=session_id)
-    total = 0.0
-    for inst in instances:
-        after = (
-            inst["prior_death_observed_at"]
-            if inst["prior_death_observed_at"] is not None
-            else _NO_LOWER
-        )
-        until = inst["ended_at"] if inst["ended_at"] is not None else _NO_UPPER
-        cursor = await db.execute(
-            """
-            SELECT MAX(cost_usd) AS m FROM claude_log_statuslines
-            WHERE session_id = ?
-                  AND pid = ? AND source_system = ? AND cwd = ?
-                  AND received_at > ? AND received_at <= ?
-            """,
-            (
-                session_id,
-                inst["pid"],
-                inst["source_system"],
-                inst["cwd"],
-                after,
-                until,
-            ),
-        )
-        row = await cursor.fetchone()
-        if row is not None and row["m"] is not None:
-            total += float(row["m"])
-    return round(total, 6)
+    cursor = await db.execute(
+        "SELECT MAX(cost_usd) AS m FROM claude_log_statuslines "
+        "WHERE session_id = ? AND cost_usd IS NOT NULL",
+        (session_id,),
+    )
+    row = await cursor.fetchone()
+    return round(float(row["m"]), 6) if row and row["m"] is not None else 0.0
 
 
 async def session_today_cost(db: aiosqlite.Connection, *, session_id: str) -> float:
@@ -375,53 +307,31 @@ async def session_today_cost(db: aiosqlite.Connection, *, session_id: str) -> fl
 async def _session_cost_by_day(
     db: aiosqlite.Connection, *, session_id: str
 ) -> dict[str, float]:
-    """Per-day cost increments across all process instances in this session.
+    """Per-day cost deltas across the full session timeline.
 
-    Within a single instance, daily delta = MAX(cost_usd today) - MAX(cost_usd
-    through yesterday). Session daily total = sum of per-instance deltas.
+    Claude Code's cost_usd is session-cumulative (carries across
+    ``--resume``). Daily delta = MAX(cost_usd that day) - MAX(cost_usd
+    through the prior day), computed globally across all PIDs.
     Server local time bucketing matches queries/processes._cost_by_day.
-    Instance-windowed grouping preserves correctness across PID reuse: each
-    (pid, source_system, cwd) span bounded by deaths is its own counter.
     """
-    instances = await _session_process_instances(db, session_id=session_id)
+    cursor = await db.execute(
+        """
+        SELECT date(received_at, 'unixepoch', 'localtime') AS day,
+               MAX(cost_usd) AS day_max
+        FROM claude_log_statuslines
+        WHERE session_id = ? AND cost_usd IS NOT NULL
+        GROUP BY day
+        ORDER BY day
+        """,
+        (session_id,),
+    )
     by_day: dict[str, float] = {}
-
-    for inst in instances:
-        after = (
-            inst["prior_death_observed_at"]
-            if inst["prior_death_observed_at"] is not None
-            else _NO_LOWER
-        )
-        until = inst["ended_at"] if inst["ended_at"] is not None else _NO_UPPER
-        cursor = await db.execute(
-            """
-            SELECT date(received_at, 'unixepoch', 'localtime') AS day,
-                   MAX(cost_usd) AS day_max
-            FROM claude_log_statuslines
-            WHERE session_id = ?
-                  AND pid = ? AND source_system = ? AND cwd = ?
-                  AND received_at > ? AND received_at <= ?
-                  AND cost_usd IS NOT NULL
-            GROUP BY day
-            ORDER BY day
-            """,
-            (
-                session_id,
-                inst["pid"],
-                inst["source_system"],
-                inst["cwd"],
-                after,
-                until,
-            ),
-        )
-        prev_max = 0.0
-        for r in await cursor.fetchall():
-            day_max = float(r["day_max"]) if r["day_max"] is not None else prev_max
-            delta = day_max - prev_max
-            by_day[r["day"]] = by_day.get(r["day"], 0.0) + delta
-            prev_max = day_max
-
-    return {d: round(v, 6) for d, v in by_day.items()}
+    prev_max = 0.0
+    for r in await cursor.fetchall():
+        day_max = float(r["day_max"]) if r["day_max"] is not None else prev_max
+        by_day[r["day"]] = round(day_max - prev_max, 6)
+        prev_max = day_max
+    return by_day
 
 
 async def get_sessions(

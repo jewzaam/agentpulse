@@ -172,17 +172,17 @@ async def broadcast_statusline_logged(
 ) -> None:
     """One row in claude_log_statuslines → one frame on /ws/v2.
 
-    `session_total_cost_usd` is server-derived (sum of MAX(cost_usd) per
-    process instance in the session, including this row). Lets clients
-    update the per-session total live without re-fetching REST after a
-    `claude --resume` resets the per-process `cost_usd` counter.
+    `session_total_cost_usd` is server-derived (global MAX(cost_usd)
+    across all statusline rows for the session). Claude Code's cost_usd
+    is session-cumulative — it carries forward across ``--resume``, so
+    the latest row always holds the true session total.
 
     `session_today_cost_usd` is the today (server local time) bucket of
-    the same derivation — same value the client would get by plucking
-    today's key out of `cost_by_day` on the REST `SessionResponse`. The
-    full daily map is intentionally NOT on the wire (unbounded growth
-    for long-running sessions); today's scalar is the only bucket that
-    moves between consecutive statuslines.
+    the cost_by_day derivation — same value the client would get by
+    plucking today's key from ``cost_by_day`` on the REST
+    ``SessionResponse``. The full daily map is intentionally NOT on the
+    wire (unbounded growth for long-running sessions); today's scalar is
+    the only bucket that moves between consecutive statuslines.
     """
     logger.debug("broadcast statusline_logged log_id=%d session=%s", log_id, session_id)
     await manager.broadcast(
