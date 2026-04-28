@@ -9,10 +9,8 @@ import time
 import aiosqlite
 from fastapi import APIRouter, Request, Response
 
-from agentpulse.api.v2.events import (
-    broadcast_hook_logged,
-    broadcast_statusline_logged,
-)
+from agentpulse.api.v2.events import broadcast_statusline_logged
+from agentpulse.api.v2.throttle import hook_throttle
 from agentpulse.api.v2.queries import IdEnricher, session_today_cost, session_total_cost
 from agentpulse.db import get_db
 from agentpulse.events import (
@@ -197,7 +195,7 @@ async def receive_hook(payload: ClaudeHookPayload, request: Request) -> dict:
             source_system=payload.source_system,
             cwd=payload.cwd,
         )
-        await broadcast_hook_logged(
+        await hook_throttle.submit(
             log_id=v2_log_id,
             process_id=process_id,
             epoch_id=epoch_id,

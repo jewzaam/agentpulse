@@ -15,8 +15,13 @@ Aligned with the data model in [`database.md`](database.md).
 4. **Server-derived ids on every message.** `process_id` and
    `epoch_id` ship with each message so clients can mirror the REST
    projection without recomputing.
-5. **No silent skips.** Every log write broadcasts. There is no
-   "deferred" insert.
+5. **State changes are immediate; same-state events may be
+   coalesced.** `hook_logged` broadcasts use a per-session debounce:
+   events that change the derived state broadcast immediately, while
+   same-state events (e.g. repeated `working`) are coalesced within
+   a configurable window (default 500ms). The latest buffered event
+   broadcasts when the window expires. Storage is unaffected — every
+   log write still lands in `claude_log_hooks`.
 
 ## Endpoint
 
@@ -116,7 +121,8 @@ plus derived ids and `type`/`platform`/`timestamp` envelope.
   "claude_version": "2.1.117",
   "received_at": 1776947339.99,
   "received_by": "hook-endpoint",
-  "log_id": 4123
+  "log_id": 4123,
+  "derived_state": "working"
 }
 ```
 
@@ -145,6 +151,36 @@ wire bounds the broadcast size; raw access is one REST hop away.
 
 The list is non-exhaustive — Claude Code adds events. Clients should
 ignore unknown `event_name` values rather than error.
+
+#### `derived_state`
+
+Server-computed from `(event_name, tool_name, agent_id)` using the
+same mapping documented in `state-transitions.md`. Possible values:
+`working`, `awaiting_input`, `permission_required`, `ready`, `idle`,
+or `null` (terminal / unknown).
+
+Clients can use this instead of recomputing state from
+`event_name` + `tool_name`.
+
+#### Throttling
+
+`hook_logged` broadcasts are debounced per `(session_id, agent_id)`
+scope. The server tracks the last-broadcast `derived_state` for
+each scope:
+
+- **Immediate broadcast:** state changes, lifecycle events
+  (`SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`,
+  `UserPromptSubmit`, `clear_state`, `Notification`), and terminal
+  events (`derived_state` is `null`).
+- **Debounced:** same-state events (e.g. `PreToolUse` → `working`
+  when the previous broadcast was also `working`). The latest event
+  replaces any pending buffer. When the window expires (default
+  500ms, configurable via `broadcast_debounce_ms` in config), the
+  buffered event broadcasts.
+
+Storage is unaffected — every hook still lands in
+`claude_log_hooks`. Clients needing complete event history should
+use `GET /api/v2/log/hooks`.
 
 ### `statusline_logged`
 

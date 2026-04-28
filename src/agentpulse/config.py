@@ -24,6 +24,7 @@ DEFAULT_LOG_FILE = CLAUDE_HOME / "agentpulse" / "agentpulse.log"
 DEFAULT_PIDFILE_DIR = CLAUDE_HOME / "agentpulse"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_DISCOVERY_INTERVAL_SECONDS = 5
+DEFAULT_BROADCAST_DEBOUNCE_MS = 500
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Settings:
     log_level: str = DEFAULT_LOG_LEVEL
     discovery_interval_seconds: int = DEFAULT_DISCOVERY_INTERVAL_SECONDS
     fetch_limits: bool = False
+    broadcast_debounce_ms: int = DEFAULT_BROADCAST_DEBOUNCE_MS
 
     @classmethod
     def from_config(cls, *, config_path: Path) -> "Settings":
@@ -88,6 +90,9 @@ class Settings:
             ),
             fetch_limits=str(data.get("fetch_limits", "")).lower()
             in ("1", "true", "yes"),
+            broadcast_debounce_ms=int(
+                data.get("broadcast_debounce_ms", DEFAULT_BROADCAST_DEBOUNCE_MS)
+            ),
         )
 
 

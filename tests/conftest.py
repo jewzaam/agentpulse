@@ -83,6 +83,16 @@ def _block_http(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_throttle() -> None:
+    """Reset the broadcast throttle between tests to prevent state leakage."""
+    from agentpulse.api.v2.throttle import hook_throttle
+
+    hook_throttle.shutdown()
+    yield
+    hook_throttle.shutdown()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config(tmp_path: Path) -> None:
     """Create an isolated config file pointing DB at tmp_path."""
     import json
