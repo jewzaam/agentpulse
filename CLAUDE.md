@@ -37,7 +37,8 @@ See `config.example.json` for the schema. No environment variable overrides.
 
 Key settings: `host`, `port`, `db_path`, `log_file`, `pidfile_dir`, `log_level`,
 `discovery_interval_seconds`, `fetch_limits` (bool — enables OAuth API usage limit
-fetching). `pidfile_dir` defaults to `~/.claude/agentpulse/`; override it to run a
+fetching), `broadcast_debounce_ms` (int, default 500 — hook broadcast debounce
+window; 0 disables throttling). `pidfile_dir` defaults to `~/.claude/agentpulse/`; override it to run a
 second instance side-by-side (e.g. `oneshot/` for testing) without colliding on
 the live deployment's pidfile.
 
@@ -89,6 +90,7 @@ src/agentpulse/
         ├── models.py             # ProcessResponse, SessionResponse, EpochResponse, ...
         ├── ids.py                # process_id, epoch_id (sha256 prefix-16)
         ├── state.py              # v2 derive_state (Stop → ready) + compute_effective_state
+        ├── throttle.py           # HookBroadcastThrottle — debounces same-state hook_logged broadcasts
         ├── websocket.py          # /ws/v2 endpoint (separate ConnectionManager from v1)
         ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged
         └── queries/              # projection layer over claude_log_* tables
@@ -129,6 +131,12 @@ src/agentpulse/
   that process started. Do not SUM per-instance MAXes.
 - **Limits fetching is optional** — `fetch_limits: true` enables OAuth API calls.
   When false, completely inert (no token read, no API call). Inert on Vertex.
+- **hook_logged broadcasts are debounced** — `HookBroadcastThrottle` in
+  `api/v2/throttle.py` debounces per `(session_id, agent_id)`. State changes
+  and lifecycle events broadcast immediately; same-state events coalesce within
+  a configurable window (`broadcast_debounce_ms`, default 500). Storage is
+  unaffected — every hook still lands in `claude_log_hooks`. `derived_state`
+  is computed server-side and included on every `hook_logged` frame.
 
 ## WebSocket API
 
@@ -152,10 +160,12 @@ have `session_id`.
 **Endpoint:** `ws://host:port/ws/v2` — receive-only JSON text frames.
 
 **Message types:** one per `claude_log_*` table:
-- `hook_logged` — every row in `claude_log_hooks`. Carries the row's
-  columns plus derived `process_id`, `epoch_id`, `log_id`. Clients
-  dispatch on `event_name` (`SessionStart`, `PreToolUse`, `Stop`, etc.)
-  for the typed signal they want.
+- `hook_logged` — carries the row's columns plus derived `process_id`,
+  `epoch_id`, `log_id`, and `derived_state`. Same-state events are
+  debounced per `(session_id, agent_id)`; state changes and lifecycle
+  events broadcast immediately. Clients dispatch on `event_name`
+  (`SessionStart`, `PreToolUse`, `Stop`, etc.) for the typed signal
+  they want.
 - `statusline_logged` — every row in `claude_log_statuslines`. Cost,
   context, model, etc., plus derived ids and `log_id`. Includes
   `session_total_cost_usd` (server-derived global MAX(cost_usd) for

@@ -15,6 +15,7 @@ from agentpulse.api.claude import router as claude_api_router
 from agentpulse.api.sessions import router as sessions_router
 from agentpulse.api.v2 import router as v2_router
 from agentpulse.api.v2 import ws_router as v2_ws_router
+from agentpulse.api.v2.throttle import hook_throttle
 from agentpulse.config import get_settings
 from agentpulse.db import close_db, init_db
 from agentpulse.platforms.claude.discovery import run_discovery_tick
@@ -71,6 +72,7 @@ async def _pid_watcher_loop(
     while True:
         try:
             await run_pid_watcher_tick(db)
+            hook_throttle.sweep_stale()
         except Exception:
             logger.exception("pid watcher tick failed")
         await asyncio.sleep(interval)
@@ -80,15 +82,17 @@ async def _pid_watcher_loop(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup and shutdown."""
     settings = get_settings()
+    hook_throttle._debounce_seconds = settings.broadcast_debounce_ms / 1000.0
     logger.info(
         "starting host=%s port=%d db=%s log_level=%s"
-        " discovery_interval=%ds fetch_limits=%s",
+        " discovery_interval=%ds fetch_limits=%s broadcast_debounce=%dms",
         settings.host,
         settings.port,
         settings.db_path,
         settings.log_level,
         settings.discovery_interval_seconds,
         settings.fetch_limits,
+        settings.broadcast_debounce_ms,
     )
     try:
         db = await init_db(db_path=settings.db_path)
@@ -123,6 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         logger.info("shutting down")
+        hook_throttle.shutdown()
         discovery_task.cancel()
         pid_watcher_task.cancel()
         for task in (discovery_task, pid_watcher_task):

@@ -35,6 +35,7 @@ async def broadcast_hook_logged(
     claude_version: str | None,
     received_at: float,
     received_by: str,
+    derived_state: str | None = None,
 ) -> None:
     """One row in claude_log_hooks → one frame on /ws/v2."""
     logger.debug(
@@ -64,6 +65,7 @@ async def broadcast_hook_logged(
             "received_at": received_at,
             "received_by": received_by,
             "log_id": log_id,
+            "derived_state": derived_state,
         }
     )
 

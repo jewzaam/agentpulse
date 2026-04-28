@@ -6,5 +6,6 @@
   "pidfile_dir": "~/.claude/agentpulse",
   "log_level": "INFO",
   "discovery_interval_seconds": 5,
-  "fetch_limits": false
+  "fetch_limits": false,
+  "broadcast_debounce_ms": 500
 }

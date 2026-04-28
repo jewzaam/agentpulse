@@ -113,6 +113,15 @@ The catch-all for hook events. Dispatch on `event_name`.
 
 Ignore unknown `event_name` values — Claude Code adds events.
 
+Every `hook_logged` frame includes `derived_state` (server-computed).
+Use it instead of recomputing from `event_name` + `tool_name`.
+
+**Throttling:** same-state events are debounced per
+`(session_id, agent_id)`. State changes broadcast immediately;
+same-state events coalesce within a 500ms window (configurable).
+Clients needing full event history should use
+`GET /api/v2/log/hooks`.
+
 ### `statusline_logged`
 
 A cost / token / context snapshot. Replace (don't accumulate) the
