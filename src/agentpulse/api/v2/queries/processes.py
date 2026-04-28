@@ -230,7 +230,28 @@ async def _session_cost_baselines(
             (sid, window_start),
         )
         row = await cursor.fetchone()
-        baselines[sid] = float(row["m"]) if row and row["m"] is not None else 0.0
+        if row and row["m"] is not None:
+            baselines[sid] = float(row["m"])
+        else:
+            first_hook = await db.execute(
+                "SELECT event_name FROM claude_log_hooks "
+                "WHERE session_id = ? ORDER BY received_at, id LIMIT 1",
+                (sid,),
+            )
+            fh_row = await first_hook.fetchone()
+            is_resumed = fh_row is not None and fh_row["event_name"] != "SessionStart"
+            if is_resumed:
+                min_cursor = await db.execute(
+                    "SELECT MIN(cost_usd) AS m FROM claude_log_statuslines "
+                    "WHERE session_id = ? AND cost_usd IS NOT NULL",
+                    (sid,),
+                )
+                min_row = await min_cursor.fetchone()
+                baselines[sid] = (
+                    float(min_row["m"]) if min_row and min_row["m"] is not None else 0.0
+                )
+            else:
+                baselines[sid] = 0.0
     return baselines
 
 

@@ -207,7 +207,8 @@ async def _derive_session(db: aiosqlite.Connection, *, session_id: str) -> dict 
         earliest_received_at=earliest,
     )
 
-    # ended_at: from a SessionEnd hook for this session (any pid)
+    # ended_at: from a SessionEnd hook, but only if no activity followed it
+    # (a resumed session will have hooks after the SessionEnd)
     cursor = await db.execute(
         """
         SELECT received_at FROM claude_log_hooks
@@ -217,7 +218,16 @@ async def _derive_session(db: aiosqlite.Connection, *, session_id: str) -> dict 
         (session_id,),
     )
     end_row = await cursor.fetchone()
-    ended_at = float(end_row["received_at"]) if end_row else None
+    if end_row:
+        end_ts = float(end_row["received_at"])
+        cursor = await db.execute(
+            "SELECT 1 FROM claude_log_hooks "
+            "WHERE session_id = ? AND received_at > ? LIMIT 1",
+            (session_id, end_ts),
+        )
+        ended_at = None if await cursor.fetchone() else end_ts
+    else:
+        ended_at = None
 
     last_event = (latest_hook or {}).get("event_name")
     last_tool = (latest_hook or {}).get("tool_name")
@@ -313,10 +323,21 @@ async def _session_cost_by_day(
     ``--resume``). Daily delta = MAX(cost_usd that day) - MAX(cost_usd
     through the prior day), computed globally across all PIDs.
     Server local time bucketing matches queries/processes._cost_by_day.
+
+    For resumed sessions (first hook is not SessionStart), the baseline
+    starts at MIN(cost_usd) from the earliest observed day so that
+    inherited cost from prior processes is not attributed to the first
+    observed day.
+
+    When a day's MAX(cost_usd) is lower than the prior day's MAX, the
+    cost counter has reset (new process started fresh rather than
+    inheriting). The day's delta uses MAX - MIN within that day instead
+    of the cross-day running delta.
     """
     cursor = await db.execute(
         """
         SELECT date(received_at, 'unixepoch', 'localtime') AS day,
+               MIN(cost_usd) AS day_min,
                MAX(cost_usd) AS day_max
         FROM claude_log_statuslines
         WHERE session_id = ? AND cost_usd IS NOT NULL
@@ -326,10 +347,36 @@ async def _session_cost_by_day(
         (session_id,),
     )
     by_day: dict[str, float] = {}
-    prev_max = 0.0
-    for r in await cursor.fetchall():
+    rows = list(await cursor.fetchall())
+    if not rows:
+        return by_day
+
+    # Detect resumed sessions: if the earliest hook is not SessionStart,
+    # the session was --resumed and the first statusline carries inherited
+    # cost from prior processes AgentPulse may never have observed.
+    first_hook = await db.execute(
+        "SELECT event_name FROM claude_log_hooks "
+        "WHERE session_id = ? ORDER BY received_at, id LIMIT 1",
+        (session_id,),
+    )
+    first_hook_row = await first_hook.fetchone()
+    is_resumed = (
+        first_hook_row is not None and first_hook_row["event_name"] != "SessionStart"
+    )
+    if is_resumed:
+        prev_max = float(rows[0]["day_min"])
+    else:
+        prev_max = 0.0
+
+    for r in rows:
         day_max = float(r["day_max"]) if r["day_max"] is not None else prev_max
-        by_day[r["day"]] = round(day_max - prev_max, 6)
+        day_min = float(r["day_min"]) if r["day_min"] is not None else prev_max
+        if day_max < prev_max:
+            # Cost counter reset — new process started fresh.
+            delta = day_max - day_min
+        else:
+            delta = day_max - prev_max
+        by_day[r["day"]] = round(delta, 6)
         prev_max = day_max
     return by_day
 
