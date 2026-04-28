@@ -4,20 +4,21 @@
 Mirrors docs/reference/state-transitions.md. Differs from v1 in two places:
 
 1. `Stop` maps to `ready` (transient). v1 maps to `idle`.
-2. Priority is `permission_required > awaiting_input > ready > working > idle`.
-   v1 had `working > ready` (legacy mistake — see plan-v2-refactor.md).
+2. Priority is `permission_required > awaiting_input > working > ready > idle`.
+   Agent-level `ready` is not user-actionable — working outranks it so any
+   active agent keeps the session showing as working.
 
 Also handles the synthetic `clear_state` event which v1 didn't have.
 """
 
-# State priority — lower number = higher priority. Matches the v2 ordering
-# in api.md: ready outranks working (main session "done" beats a background
-# agent still ticking).
+# State priority — lower number = higher priority. Working outranks ready
+# because agent-level ready is not user-actionable; any active agent
+# should keep the session showing as working.
 _STATE_PRIORITY: dict[str, int] = {
     "permission_required": 0,
     "awaiting_input": 1,
-    "ready": 2,
-    "working": 3,
+    "working": 2,
+    "ready": 3,
     "idle": 4,
 }
 

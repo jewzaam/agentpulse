@@ -532,12 +532,13 @@ Process effective state = highest-priority across the current
 session's state and any active-agent states.
 
 Priority (highest first):
-`permission_required > awaiting_input > ready > working > idle`.
+`permission_required > awaiting_input > working > ready > idle`.
 
-`ready` outranks `working` deliberately: when the main session has
-finished but a background agent is still ticking, the user should
-see "ready" — the main thing they care about is done. The dashboard
-spec is explicit on this and AgentPulse should match.
+`working` outranks `ready`: agent-level `ready` is not
+user-actionable (users interact with the main loop, not individual
+agents), so any active agent should keep the session showing as
+working. The "needs attention" signal is already carried by
+`permission_required` and `awaiting_input`.
 
 ### Notes on individual states
 

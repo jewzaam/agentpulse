@@ -88,8 +88,8 @@ effective_state = max_priority(main_state, agent_1_state, agent_2_state, ...)
 |----------|-------|---------|
 | 1 (highest) | Permission Required | Something is blocked waiting for approval |
 | 2 | Awaiting Input | Something asked a question |
-| 3 | Ready | Main process finished (no agents blocking) |
-| 4 | Working | Something is actively processing |
+| 3 | Working | Something is actively processing |
+| 4 | Ready | Main process finished (no agents blocking) |
 | 5 | Idle | Nothing happening |
 | 6 (lowest) | Unknown | No hook events received yet |
 
