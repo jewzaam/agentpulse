@@ -193,12 +193,24 @@ class TestGetProcessesPerInstance:
 
     async def test_cost_usd_is_per_instance(self, db) -> None:
         # Instance 1: cost reaches 5.0. Instance 2: cost reaches 3.0.
-        await _seed_hook(db, session_id="s1", pid=4242, received_at=10.0)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=4242,
+            received_at=10.0,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=4242, received_at=20.0, cost_usd=5.0
         )
         await _seed_death(db, pid=4242, observed_at=100.0)
-        await _seed_hook(db, session_id="s2", pid=4242, received_at=200.0)
+        await _seed_hook(
+            db,
+            session_id="s2",
+            pid=4242,
+            received_at=200.0,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s2", pid=4242, received_at=210.0, cost_usd=3.0
         )
@@ -212,12 +224,24 @@ class TestGetProcessesPerInstance:
     async def test_cost_by_day_is_per_instance(self, db) -> None:
         # Instance 1: $5 on day 1. Instance 2: $3 on day 1 (different process,
         # cumulative-per-process). Each instance's daily delta is its own.
-        await _seed_hook(db, session_id="s1", pid=4242, received_at=10.0)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=4242,
+            received_at=10.0,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=4242, received_at=20.0, cost_usd=5.0
         )
         await _seed_death(db, pid=4242, observed_at=100.0)
-        await _seed_hook(db, session_id="s2", pid=4242, received_at=200.0)
+        await _seed_hook(
+            db,
+            session_id="s2",
+            pid=4242,
+            received_at=200.0,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s2", pid=4242, received_at=210.0, cost_usd=3.0
         )

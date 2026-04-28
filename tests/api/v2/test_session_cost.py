@@ -30,10 +30,11 @@ async def _seed_hook(
     received_at: float,
     cwd: str = "/proj",
     source_system: str = "host",
+    event_name: str = "PreToolUse",
 ) -> None:
     payload = {
         "session_id": session_id,
-        "hook_event_name": "PreToolUse",
+        "hook_event_name": event_name,
         "pid": pid,
         "source_system": source_system,
         "cwd": cwd,
@@ -94,7 +95,13 @@ DAY2_START = DAY1_START + 86400.0  # day after
 
 class TestSessionTotalCost:
     async def test_single_process_session(self, db) -> None:
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=2.5
         )
@@ -106,8 +113,14 @@ class TestSessionTotalCost:
         # Three SDK invocations on the same session. cost_usd is
         # session-cumulative: each new process carries forward the prior
         # total. The session total is the global MAX.
-        for pid, cost in [(10, 5.0), (20, 12.5), (30, 13.75)]:
-            await _seed_hook(db, session_id="s1", pid=pid, received_at=DAY1_START + pid)
+        for i, (pid, cost) in enumerate([(10, 5.0), (20, 12.5), (30, 13.75)]):
+            await _seed_hook(
+                db,
+                session_id="s1",
+                pid=pid,
+                received_at=DAY1_START + pid,
+                event_name="SessionStart" if i == 0 else "PreToolUse",
+            )
             await _seed_statusline(
                 db,
                 session_id="s1",
@@ -122,7 +135,13 @@ class TestSessionTotalCost:
         """Cost is monotonic within a process — only the LAST (max) reading
         counts per process. Multiple statuslines from one process don't
         double-count."""
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         # Three readings from the same process — only the max matters
         for ts_offset, cost in [(60, 1.0), (120, 3.0), (180, 5.0)]:
             await _seed_statusline(
@@ -136,7 +155,13 @@ class TestSessionTotalCost:
         assert sess["total_cost_usd"] == 5.0  # max(cost), not sum
 
     async def test_no_cost_yields_zero(self, db) -> None:
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         # No statuslines at all
         sess = await queries.get_session_by_id(db, session_id="s1")
         assert sess["total_cost_usd"] == 0.0
@@ -145,7 +170,13 @@ class TestSessionTotalCost:
 
 class TestSessionCostByDay:
     async def test_single_process_one_day(self, db) -> None:
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=4.0
         )
@@ -157,7 +188,13 @@ class TestSessionCostByDay:
     async def test_single_process_two_days(self, db) -> None:
         # Day 1: cost reaches 3.0. Day 2: same process continues, reaches 5.0.
         # Daily deltas: D1=3.0, D2=2.0. Sum=5.0 = the process's MAX.
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=3.0
         )
@@ -174,7 +211,13 @@ class TestSessionCostByDay:
     async def test_multi_process_same_day_cumulative(self, db) -> None:
         # Two processes on the same day. cost_usd is session-cumulative:
         # pid=20 inherits $2 from pid=10, adds $3 of new work → $5.
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_hook(db, session_id="s1", pid=20, received_at=DAY1_START + 5)
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=2.0
@@ -190,7 +233,13 @@ class TestSessionCostByDay:
     async def test_multi_process_multi_day(self, db) -> None:
         # Process A: day1 costs $2. Process B resumes on day2, inherits $2,
         # adds $3 of new work → cumulative $5. Day1=$2, Day2=$3. Total=$5.
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=2.0
         )
@@ -209,7 +258,13 @@ class TestSessionCostByDay:
         """Second process inherits session cost from the first.
         P10 reaches $4, P20 inherits and adds $1.5 → cumulative $5.5.
         """
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_hook(db, session_id="s1", pid=20, received_at=DAY1_START + 30)
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 100, cost_usd=4.0
@@ -233,7 +288,13 @@ class TestPidReuseAggregation:
 
     async def test_total_cost_with_reused_pid(self, db) -> None:
         # Instance 1: pid=10 reaches $7, dies on day 1
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=7.0
         )
@@ -249,7 +310,13 @@ class TestPidReuseAggregation:
 
     async def test_cost_by_day_with_reused_pid(self, db) -> None:
         # Same scenario — daily deltas: D1=$7, D2=$11-$7=$4
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=7.0
         )
@@ -273,7 +340,13 @@ class TestResumedSessionCost:
 
     async def test_resumed_session_total_cost(self, db) -> None:
         # Day 1: pid=100 works up to $17.24
-        await _seed_hook(db, session_id="s1", pid=100, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=100,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=100, received_at=DAY1_START + 60, cost_usd=17.24
         )
@@ -302,12 +375,93 @@ class TestResumedSessionCost:
         assert sess["cost_by_day"][days[0]] == pytest.approx(17.24)
         assert sess["cost_by_day"][days[1]] == pytest.approx(2.88)
 
+    async def test_resumed_session_no_prior_day_data(self, db) -> None:
+        """When AgentPulse has no data from prior days, inherited cost
+        should not be attributed to the first observed day."""
+        # Only today's data — session was --resumed with inherited cost
+        # that AgentPulse never saw (no prior-day rows in DB).
+        # No SessionStart hook → detected as resumed.
+        await _seed_hook(db, session_id="s1", pid=200, received_at=DAY2_START)
+        await _seed_statusline(
+            db,
+            session_id="s1",
+            pid=200,
+            received_at=DAY2_START + 10,
+            cost_usd=18.83,
+        )
+        await _seed_statusline(
+            db,
+            session_id="s1",
+            pid=200,
+            received_at=DAY2_START + 60,
+            cost_usd=20.12,
+        )
+
+        sess = await queries.get_session_by_id(db, session_id="s1")
+        assert sess["total_cost_usd"] == pytest.approx(20.12)
+        days = sorted(sess["cost_by_day"].keys())
+        assert len(days) == 1
+        # Delta should be 20.12 - 18.83 = 1.29 (today's work only),
+        # not 20.12 (full cumulative from 0).
+        assert sess["cost_by_day"][days[0]] == pytest.approx(1.29)
+
+    async def test_cost_counter_reset_no_negative_delta(self, db) -> None:
+        """When a new process starts with a fresh cost counter (cost_usd
+        drops), the day's delta should be the new counter's range, not a
+        negative cross-counter delta."""
+        # Day 1: pid=68565 accrues $77.84
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=68565,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
+        await _seed_statusline(
+            db,
+            session_id="s1",
+            pid=68565,
+            received_at=DAY1_START + 60,
+            cost_usd=77.84,
+        )
+        # Day 2: pid=208349 starts fresh at ~$0, accrues to $2.69
+        await _seed_hook(db, session_id="s1", pid=208349, received_at=DAY2_START)
+        await _seed_statusline(
+            db,
+            session_id="s1",
+            pid=208349,
+            received_at=DAY2_START + 10,
+            cost_usd=0.12,
+        )
+        await _seed_statusline(
+            db,
+            session_id="s1",
+            pid=208349,
+            received_at=DAY2_START + 60,
+            cost_usd=2.69,
+        )
+
+        sess = await queries.get_session_by_id(db, session_id="s1")
+        days = sorted(sess["cost_by_day"].keys())
+        assert len(days) == 2
+        assert sess["cost_by_day"][days[0]] == pytest.approx(77.84)
+        # Day 2 should be 2.69 - 0.12 = 2.57 (new counter range),
+        # NOT 2.69 - 77.84 = -75.15 (negative cross-counter delta)
+        assert sess["cost_by_day"][days[1]] == pytest.approx(2.57)
+        assert sess["cost_by_day"][days[1]] > 0
+
 
 class TestSessionEndpointExposesCost:
     """The values flow through SessionResponse to the /api/v2/sessions endpoint."""
 
     async def test_response_dict_carries_total_and_breakdown(self, db) -> None:
-        await _seed_hook(db, session_id="s1", pid=10, received_at=DAY1_START)
+        await _seed_hook(
+            db,
+            session_id="s1",
+            pid=10,
+            received_at=DAY1_START,
+            event_name="SessionStart",
+        )
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=7.0
         )
