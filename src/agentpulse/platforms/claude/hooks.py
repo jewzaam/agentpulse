@@ -18,7 +18,7 @@ from agentpulse.events import (
     broadcast_session_discovered,
     broadcast_statusline_update,
 )
-from agentpulse.platforms.claude.discovery import detect_entrypoint
+from agentpulse.platforms.claude.entrypoint import detect_entrypoint
 from agentpulse.platforms.claude.models import ClaudeHookPayload
 from agentpulse.platforms.claude import schema
 from agentpulse.timeutil import local_midnight_epoch
