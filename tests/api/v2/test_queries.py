@@ -565,3 +565,406 @@ class TestGetSessionById:
             earliest_received_at=100.5,
         )
         assert detail["epochs"][0]["epoch_id"] == expected
+
+
+class TestSessionDerivedState:
+    """derived_state must reflect root agent state, not subagent lifecycle."""
+
+    async def test_subagent_stop_does_not_mask_root_state(self, db) -> None:
+        """When latest hook is SubagentStop but root agent's last event is
+        Stop, session derived_state should be 'ready', not null."""
+        # Root agent works, then stops (ready)
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PreToolUse",
+            tool_name="Bash",
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PostToolUse",
+            tool_name="Bash",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=120.0,
+        )
+        # Subagent starts and stops (latest hook overall)
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=130.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=140.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] == "ready"
+
+    async def test_subagent_stop_with_root_working(self, db) -> None:
+        """Root agent doing tool use, subagent finishes — session is working."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PreToolUse",
+            tool_name="Edit",
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=120.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] == "working"
+
+    async def test_no_root_hooks_only_subagent(self, db) -> None:
+        """Session with only subagent hooks → derived_state is None."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=110.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] is None
+
+    async def test_active_subagent_contributes_to_state(self, db) -> None:
+        """A running subagent's state feeds into compute_effective_state."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=100.0,
+        )
+        # Subagent started but not stopped — still active
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PreToolUse",
+            tool_name="Bash",
+            agent_id="agent-1",
+            received_at=120.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        # Root is "ready" (Stop), active agent is "working" (PreToolUse)
+        # → effective state is "working" (higher priority)
+        assert detail["derived_state"] == "working"
+
+    async def test_multiple_subagents_all_stopped(self, db) -> None:
+        """Multiple finished subagents don't mask root state."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="UserPromptSubmit",
+            tool_name=None,
+            received_at=100.0,
+        )
+        for i, t in enumerate([110.0, 120.0, 130.0, 140.0, 150.0, 160.0]):
+            agent = f"agent-{i // 2 + 1}"
+            event = "SubagentStart" if i % 2 == 0 else "SubagentStop"
+            await _seed_hook(
+                db,
+                session_id="sa",
+                pid=10,
+                event_name=event,
+                agent_id=agent,
+                received_at=t,
+            )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] == "working"
+
+    async def test_notification_does_not_mask_root_state(self, db) -> None:
+        """Notification events don't produce state — skip to prior Stop."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Notification",
+            tool_name=None,
+            received_at=110.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] == "ready"
+
+    async def test_notification_plus_subagent_stop(self, db) -> None:
+        """Real-world scenario: Stop → Notification → SubagentStop."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Notification",
+            tool_name=None,
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=120.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=130.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["derived_state"] == "ready"
+
+    async def test_multi_cycle_stop_notification_subagent_stop(self, db) -> None:
+        """Reproduces real session 73b9a18e: multiple work→Stop→Notification
+        cycles with SubagentStop events arriving after the last Notification.
+        derived_state must be 'ready' (from the last Stop), not null."""
+        # First work cycle
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="UserPromptSubmit",
+            tool_name=None,
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PreToolUse",
+            tool_name="Bash",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PostToolUse",
+            tool_name="Bash",
+            received_at=120.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=130.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Notification",
+            tool_name=None,
+            received_at=140.0,
+        )
+        # First subagent finishes (was spawned during the work cycle)
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=150.0,
+        )
+        # Second work cycle
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="UserPromptSubmit",
+            tool_name=None,
+            received_at=160.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PreToolUse",
+            tool_name="Edit",
+            received_at=170.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="PostToolUse",
+            tool_name="Edit",
+            received_at=180.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=190.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Notification",
+            tool_name=None,
+            received_at=200.0,
+        )
+        # Second subagent finishes last — absolute latest event
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-2",
+            received_at=210.0,
+        )
+
+        detail = await queries.get_session_by_id(db, session_id="sa")
+        assert detail["last_event"] == "SubagentStop"
+        assert detail["derived_state"] == "ready"
+
+        sessions = await queries.get_sessions(db)
+        assert sessions[0]["derived_state"] == "ready"
+
+        procs = await queries.get_processes(db)
+        assert procs[0]["derived_state"] == "ready"
+
+    async def test_session_list_derived_state(self, db) -> None:
+        """get_sessions (list view) uses root hook for state too."""
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=120.0,
+        )
+
+        sessions = await queries.get_sessions(db)
+        assert sessions[0]["derived_state"] == "ready"
+
+
+class TestProcessDerivedState:
+    """Process derived_state must also use root hook, not subagent lifecycle."""
+
+    async def test_process_state_ignores_subagent_stop(self, db) -> None:
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="Stop",
+            tool_name=None,
+            received_at=100.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStart",
+            agent_id="agent-1",
+            received_at=110.0,
+        )
+        await _seed_hook(
+            db,
+            session_id="sa",
+            pid=10,
+            event_name="SubagentStop",
+            agent_id="agent-1",
+            received_at=120.0,
+        )
+
+        procs = await queries.get_processes(db)
+        assert len(procs) == 1
+        assert procs[0]["derived_state"] == "ready"

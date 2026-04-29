@@ -18,7 +18,7 @@ from agentpulse.api.v2.ids import derive_process_id
 from agentpulse.api.v2.queries._helpers import (
     active_agent_states,
     agents_for_session,
-    latest_hook_for_session,
+    latest_root_hook_for_session,
 )
 from agentpulse.api.v2.queries._instance import (
     _NO_LOWER,
@@ -408,17 +408,17 @@ async def _derive_process(
 
     derived_state: str | None = None
     if current_session_id:
-        # Use the latest hook for the *current session* (not the latest hook
-        # for the process), so a process whose latest activity is on a new
-        # session reflects that session's state.
-        current_session_latest = await latest_hook_for_session(
+        # Use the latest *root* hook (agent_id IS NULL) for the current
+        # session so subagent lifecycle events (SubagentStop) don't mask
+        # the root agent's state.
+        current_session_root = await latest_root_hook_for_session(
             db, session_id=current_session_id
         )
         session_state = None
-        if current_session_latest is not None:
+        if current_session_root is not None:
             session_state = derive_state(
-                current_session_latest["event_name"],
-                tool_name=current_session_latest["tool_name"] or "",
+                current_session_root["event_name"],
+                tool_name=current_session_root["tool_name"] or "",
             )
         agents = await agents_for_session(db, session_id=current_session_id)
         derived_state = compute_effective_state(
