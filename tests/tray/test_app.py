@@ -14,15 +14,11 @@ def test_build_menu_contains_required_items() -> None:
     pytest.importorskip("pystray")
 
     from agentpulse.tray import app
-    from agentpulse.tray.state import TrayState
 
-    state = TrayState()
     menu = app._build_menu(
-        state=state,
         config_path=Path("/tmp/c.json"),
         log_path=Path("/tmp/log"),
     )
-    # pystray.Menu is iterable over MenuItem objects.
     texts = []
     for item in menu:
         text_attr = getattr(item, "text", None)
@@ -42,5 +38,5 @@ def test_load_icon_image_returns_image() -> None:
 
     from agentpulse.tray import app
 
-    img = app._load_icon_image(connected=True)
+    img = app._load_icon_image()
     assert img.size == (64, 64)
