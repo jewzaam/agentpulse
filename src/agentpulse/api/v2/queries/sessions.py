@@ -13,6 +13,7 @@ from agentpulse.api.v2.queries._helpers import (
     active_agent_states,
     agents_for_session,
     latest_hook_for_session,
+    latest_root_hook_for_session,
 )
 from agentpulse.api.v2.state import compute_effective_state, derive_state
 
@@ -233,10 +234,11 @@ async def _derive_session(db: aiosqlite.Connection, *, session_id: str) -> dict 
     last_tool = (latest_hook or {}).get("tool_name")
     last_event_at = (latest_hook or {}).get("received_at")
 
+    root_hook = await latest_root_hook_for_session(db, session_id=session_id)
     session_state: str | None = None
-    if latest_hook is not None:
+    if root_hook is not None:
         session_state = derive_state(
-            latest_hook["event_name"], tool_name=latest_hook["tool_name"] or ""
+            root_hook["event_name"], tool_name=root_hook["tool_name"] or ""
         )
     agents = await agents_for_session(db, session_id=session_id)
     derived_state = compute_effective_state(session_state, active_agent_states(agents))

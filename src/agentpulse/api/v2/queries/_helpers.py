@@ -29,6 +29,36 @@ async def latest_hook_for_session(
     return dict(row) if row else None
 
 
+_NON_STATE_EVENTS: frozenset[str] = frozenset(
+    {
+        "Notification",
+        "SessionEnd",
+    }
+)
+
+
+async def latest_root_hook_for_session(
+    db: aiosqlite.Connection, *, session_id: str
+) -> dict | None:
+    """Latest state-producing hook from the root agent (agent_id IS NULL).
+
+    Skips Notification and SessionEnd — events that derive_state maps to
+    None — so the session state reflects the last meaningful root action.
+    """
+    placeholders = ",".join("?" for _ in _NON_STATE_EVENTS)
+    cursor = await db.execute(
+        f"""
+        SELECT * FROM claude_log_hooks
+        WHERE session_id = ? AND agent_id IS NULL
+              AND event_name NOT IN ({placeholders})
+        ORDER BY received_at DESC, id DESC LIMIT 1
+        """,
+        (session_id, *_NON_STATE_EVENTS),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 async def agents_for_session(
     db: aiosqlite.Connection, *, session_id: str
 ) -> list[dict]:
