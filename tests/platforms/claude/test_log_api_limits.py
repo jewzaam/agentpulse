@@ -148,10 +148,10 @@ class TestInsertLogApiLimits:
         assert row["raw_response"] == "not json"
 
 
-class TestLimitsFetchDualWrite:
-    """Successful API fetch in limits.py writes to v2 + broadcasts."""
+class TestLimitsFetchPath:
+    """Successful API fetch in limits.py writes the v2 log row + broadcast."""
 
-    async def test_dual_write_on_successful_fetch(self, db, tmp_path) -> None:
+    async def test_writes_log_row_and_broadcasts(self, db, tmp_path) -> None:
         from agentpulse.platforms.claude import limits
 
         limits.reset_state()
@@ -168,27 +168,22 @@ class TestLimitsFetchDualWrite:
             patch.object(limits, "_fetch_from_api", return_value=_SAMPLE_RAW),
             patch(
                 "agentpulse.platforms.claude.limits.broadcast_api_limits_logged"
-            ) as mock_v2_bc,
-            patch("agentpulse.platforms.claude.limits.broadcast_limits_updated"),
+            ) as mock_bc,
         ):
-            await limits.get_limits(db)
+            ok = await limits.get_limits(db)
 
-        # v1 row written
-        v1_cursor = await db.execute("SELECT count(*) AS n FROM claude_limits")
-        assert dict(await v1_cursor.fetchone())["n"] == 1
+        assert ok is True
 
-        # v2 row written
-        v2_cursor = await db.execute(
+        cursor = await db.execute(
             "SELECT * FROM claude_log_api_limits ORDER BY id DESC LIMIT 1"
         )
-        v2_row = dict(await v2_cursor.fetchone())
-        assert v2_row["received_by"] == "limits-fetcher"
-        assert v2_row["five_hour_utilization"] == 11.0
-        assert v2_row["seven_day_utilization"] == 8.0
+        row = dict(await cursor.fetchone())
+        assert row["received_by"] == "limits-fetcher"
+        assert row["five_hour_utilization"] == 11.0
+        assert row["seven_day_utilization"] == 8.0
 
-        # v2 broadcast fired
-        mock_v2_bc.assert_awaited_once()
-        kwargs = mock_v2_bc.call_args.kwargs
+        mock_bc.assert_awaited_once()
+        kwargs = mock_bc.call_args.kwargs
         assert kwargs["received_by"] == "limits-fetcher"
         assert kwargs["five_hour_utilization"] == 11.0
         assert kwargs["seven_day_utilization"] == 8.0
