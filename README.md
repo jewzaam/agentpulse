@@ -121,20 +121,21 @@ All configuration is via the config file (`--config` is required). See `config.e
 | `db_path` | SQLite database path | `~/.claude/agentpulse/agentpulse.db` |
 | `log_file` | Rotating log file path | `~/.claude/agentpulse/agentpulse.log` |
 | `log_level` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
-| `discovery_interval_seconds` | Session scan interval | `5` |
+| `discovery_interval_seconds` | PID-watcher cadence (seconds) | `5` |
 
 ### API Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `POST /hooks/claude` | Receive Claude Code hook events |
-| `GET /api/v1/sessions` | List all sessions (normalized) |
-| `GET /api/v1/sessions/{id}` | Session detail with agents |
-| `GET /api/v1/sessions/{id}/events` | Paginated event history |
-| `GET /api/v1/summary` | Aggregate stats |
-| `GET /api/v1/claude/sessions` | Raw Claude session data |
-| `GET /api/v1/claude/events` | Raw Claude events with filters |
-| `ws://host:port/ws` | Real-time event stream |
+| `POST /statusline/claude` | Receive statusline data from Claude Code |
+| `GET /api/v2/processes` | List processes (with nested sessions) |
+| `GET /api/v2/sessions` | List sessions |
+| `GET /api/v2/log/hooks` | Raw hook event log |
+| `GET /api/v2/log/statuslines` | Raw statusline log |
+| `GET /api/v2/log/pid-deaths` | Raw PID-death log |
+| `GET /api/v2/log/api-limits` | Raw OAuth limits log |
+| `ws://host:port/ws/v2` | Real-time event stream |
 
 ## Documentation
 
@@ -145,7 +146,6 @@ All configuration is via the config file (`--config` is required). See `config.e
 - [Producer/consumer flows](docs/design/ux.md) — system overview
 - [Hook payload reference](docs/reference/hooks-payload.md), [statusline payload reference](docs/reference/statusline-payload.md)
 - [Claude Code runtime](docs/reference/claude-runtime.md), [state transitions](docs/reference/state-transitions.md)
-- [v1 docs](docs/old/) — frozen reference for the current `/api/v1/` surface
 - [Test plan](TEST_PLAN.md)
 
 ## Development

@@ -234,8 +234,7 @@ Notes:
   `process_id`.
 - `last_event` / `last_tool` / `last_event_at`: from the latest hook
   event for this session.
-- `started_at` and `last_activity_at` are seconds; v1's millisecond
-  `started_at` is gone.
+- `started_at` and `last_activity_at` are Unix epoch seconds.
 
 ### `EpochResponse`
 
@@ -436,8 +435,7 @@ row.** The writer looks up the most recent prior `claude_log_hooks`
 row for `session_id` and copies forward `pid`, `source_system`,
 `cwd`, and `entrypoint`. `agent_id` is null. `raw_payload` is a
 short JSON object with the keys the writer derived plus
-`{"_synthetic": "clear-endpoint"}` — not the empty `{}` v1 used,
-which produced pid-less rows that orphaned in process derivation.
+`{"_synthetic": "clear-endpoint"}`.
 
 The synthetic clear is rejected (404) when no prior hook exists for
 the session — there's nothing to copy keys from, and clearing a
