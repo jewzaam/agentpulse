@@ -57,42 +57,32 @@ entrypoint inference (VS Code, Cursor, terminal) via process tree inspection.
 
 Claude Code's statusline sends per-session cost/token/context data via stdin JSON.
 `my-claude-stuff/statusline.py` relays this to `POST /statusline/claude` before its
-own processing. AgentPulse stores each update in `claude_statusline` (append-only history
-with extracted numerics) and enriches `claude_sessions` with the latest values.
+own processing. AgentPulse stores each update in `claude_log_statuslines` (append-only
+log with extracted numerics + raw payload).
 
 ## Architecture
 
-v1 and v2 coexist during the rollout. Hooks and statuslines dual-write
-to both layers. v1 endpoints/tables retire in slice E. See
-`docs/old/changes-with-v2.md` for the slicing plan and `plan-v2-refactor.md`
-for current slice status.
-
 ```
 src/agentpulse/
-├── app.py                        # FastAPI factory + lifespan (discovery + pid watcher loops)
+├── app.py                        # FastAPI factory + lifespan (pid watcher + limits fetch loops)
 ├── config.py                     # Settings from config file (--config required)
 ├── db.py                         # SQLite singleton (aiosqlite, WAL mode)
-├── models.py                     # v1 normalized Pydantic response models
-├── websocket.py                  # v1 ConnectionManager + /ws endpoint
-├── events.py                     # v1 broadcast functions
 ├── platforms/claude/
-│   ├── hooks.py                  # POST /hooks/claude, /statusline/claude, /costs/claude (dual-writes v1+v2)
-│   ├── discovery.py              # v1 session-level PID liveness + entrypoint detection
-│   ├── pid_watcher.py            # v2 PID death watcher → claude_log_pid_deaths
-│   ├── limits.py                 # OAuth API usage limit fetching + DB cache
-│   ├── schema.py                 # claude_* DDL + queries (v1 + v2 log_* tables, inserters, replay)
-│   └── models.py                 # Claude payload models + v1 derive_state()
+│   ├── hooks.py                  # POST /hooks/claude, /statusline/claude
+│   ├── entrypoint.py             # detect_entrypoint via psutil ancestor walk
+│   ├── pid_watcher.py            # PID death watcher → claude_log_pid_deaths
+│   ├── limits.py                 # OAuth API usage limit fetching + v2 broadcast
+│   ├── schema.py                 # claude_log_* DDL + inserters
+│   └── models.py                 # ClaudeHookPayload Pydantic model
 └── api/
-    ├── sessions.py               # v1: /api/v1/sessions, /summary, /limits
-    ├── claude.py                 # v1: /api/v1/claude/sessions, /events
     └── v2/
-        ├── router.py             # /api/v2/processes, /sessions, /log/{hooks,statuslines,pid-deaths}
+        ├── router.py             # /api/v2/processes, /sessions, /log/{hooks,statuslines,pid-deaths,api-limits}
         ├── models.py             # ProcessResponse, SessionResponse, EpochResponse, ...
         ├── ids.py                # process_id, epoch_id (sha256 prefix-16)
-        ├── state.py              # v2 derive_state (Stop → ready) + compute_effective_state
+        ├── state.py              # derive_state (Stop → ready) + compute_effective_state
         ├── throttle.py           # HookBroadcastThrottle — debounces same-state hook_logged broadcasts
-        ├── websocket.py          # /ws/v2 endpoint (separate ConnectionManager from v1)
-        ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged
+        ├── websocket.py          # /ws/v2 endpoint
+        ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged, api_limits_logged
         └── queries/              # projection layer over claude_log_* tables
             ├── log.py            # raw filtered reads
             ├── enrich.py         # IdEnricher (per-request id cache)
@@ -103,21 +93,20 @@ src/agentpulse/
 
 ## Key Design Decisions
 
-- **Raw events stored, state derived at query time** — DB has `last_event` and `last_tool`,
-  not a `state` column. `derive_state()` in `platforms/claude/models.py` computes state
-  strings at the API layer. Do not store computed states.
-- **Platform-scoped tables** — All tables prefixed `claude_`. v1 tables:
-  `claude_sessions`, `claude_agents`, `claude_events`, `claude_statusline`,
-  `claude_costs`, `claude_limits`. v2 append-only log tables:
+- **Raw events stored, state derived at query time** — `claude_log_*` tables are
+  append-only. `derive_state()` in `api/v2/state.py` computes state strings at
+  the API layer. Do not store computed states.
+- **Platform-scoped tables** — All tables prefixed `claude_`:
   `claude_log_hooks`, `claude_log_statuslines`, `claude_log_pid_deaths`,
-  `claude_log_api_limits`. Future platforms get their own tables.
-  Normalization happens at the API layer, not in storage.
-- **v2 inserters return the row id** — `insert_log_hook`, `insert_log_statusline`
+  `claude_log_api_limits`. Append-only logs; derived projections (process,
+  session, epoch, agent) live in `api/v2/queries/`. Future platforms get
+  their own tables.
+- **Inserters return the row id** — `insert_log_hook`, `insert_log_statusline`
   return `int | None` (None when payload lacks `pid`). `insert_log_pid_death`
   returns `int` (always inserts). `insert_log_api_limits` returns
   `(int, dict)` — the row id plus the normalized fields the broadcast
   needs. Callers use the returned id to broadcast `*_logged` frames on
-  `/ws/v2` after the dual-write commits.
+  `/ws/v2` after the commit.
 - **REST responses and WebSocket broadcasts must match** — every data field on a
   session or event in the REST API must also appear in the corresponding WebSocket
   broadcast. Consumers should be able to build the same view from either source.
@@ -139,23 +128,6 @@ src/agentpulse/
   is computed server-side and included on every `hook_logged` frame.
 
 ## WebSocket API
-
-Two endpoints run side by side during the v1→v2 rollout. Each has its own
-`ConnectionManager`; the streams do not cross-broadcast. Pick one per
-client.
-
-### v1 — `/ws`
-
-**Endpoint:** `ws://host:port/ws` — receive-only JSON text frames.
-
-**Message types:** `session_discovered`, `session_ended`, `session_cleared`,
-`hook_event`, `agent_started`, `agent_stopped`, `statusline_update`,
-`limits_updated`. Every message has `type`, `platform`, `timestamp`. Most
-have `session_id`.
-
-**Bootstrap:** `GET /api/v1/sessions`.
-
-### v2 — `/ws/v2`
 
 **Endpoint:** `ws://host:port/ws/v2` — receive-only JSON text frames.
 
@@ -191,18 +163,14 @@ endpoints).
 **Bootstrap:** `GET /api/v2/processes?active=true` for the initial process
 list with nested sessions, then apply incoming frames.
 
-**Full v2 protocol:** [docs/design/websocket.md](docs/design/websocket.md).
-
-### Common to both
+**Full protocol:** [docs/design/websocket.md](docs/design/websocket.md).
 
 **Ping/pong:** AgentPulse does NOT send WebSocket pings. Clients that
 expect server-initiated pings will timeout and disconnect. Configure the
 client to either disable ping expectations or send its own keep-alive
 pings.
 
-**Client guides:**
-- v1: [docs/old/clients.md](docs/old/clients.md)
-- v2: [docs/design/clients.md](docs/design/clients.md)
+**Client guide:** [docs/design/clients.md](docs/design/clients.md).
 
 ## Testing
 
@@ -218,8 +186,8 @@ pings.
 
 - `db.py` uses a module-level singleton (`_db`). Tests must call `close_db()` in teardown
   to avoid leaking connections across test files.
-- `validate_pid()` and `detect_entrypoint()` are sync and wrapped in
-  `asyncio.to_thread()`. Tests mock psutil to avoid hitting real PIDs.
+- `detect_entrypoint()` is sync and wrapped in `asyncio.to_thread()`. Tests
+  mock psutil to avoid hitting real PIDs.
 - The `src/` layout means Makefile targets use `SRC_DIR = src/$(PACKAGE_NAME)` for format,
   lint, typecheck — not the bare package name.
 - Windows `ProactorEventLoop` raises `ConnectionResetError` when hook relay clients
