@@ -140,24 +140,26 @@ class TestCostsByDay:
         assert len(result) == 1
         assert result[0]["total_cost_usd"] == pytest.approx(5.0)
 
-    async def test_multi_process_same_session_same_day_sums(self, db) -> None:
+    async def test_resumed_session_same_day_uses_max(self, db) -> None:
+        """cost_usd is session-cumulative — resumed PID inherits the total."""
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=4.0
         )
         await _seed_statusline(
-            db, session_id="s1", pid=20, received_at=DAY1_START + 120, cost_usd=1.5
+            db, session_id="s1", pid=20, received_at=DAY1_START + 120, cost_usd=5.5
         )
         result = await costs.costs_by_day(db)
         assert len(result) == 1
         assert result[0]["total_cost_usd"] == pytest.approx(5.5)
 
-    async def test_pid_reuse_with_death_yields_two_instances(self, db) -> None:
+    async def test_pid_reuse_different_sessions(self, db) -> None:
+        """PID reuse across sessions — each session has its own cost."""
         await _seed_statusline(
             db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=7.0
         )
         await _seed_death(db, pid=10, observed_at=DAY1_START + 100)
         await _seed_statusline(
-            db, session_id="s1", pid=10, received_at=DAY2_START + 60, cost_usd=4.0
+            db, session_id="s2", pid=10, received_at=DAY2_START + 60, cost_usd=4.0
         )
         result = await costs.costs_by_day(db)
         by_day = {row["day"]: row["total_cost_usd"] for row in result}
@@ -165,6 +167,21 @@ class TestCostsByDay:
         days = sorted(by_day.keys())
         assert by_day[days[0]] == pytest.approx(7.0)
         assert by_day[days[1]] == pytest.approx(4.0)
+
+    async def test_resumed_session_across_days_no_double_count(self, db) -> None:
+        """--resume inherits cumulative cost; don't double-count the baseline."""
+        await _seed_statusline(
+            db, session_id="s1", pid=10, received_at=DAY1_START + 60, cost_usd=10.0
+        )
+        # pid=20 resumes the session; cost_usd starts at 10.0 (inherited)
+        await _seed_statusline(
+            db, session_id="s1", pid=20, received_at=DAY2_START + 60, cost_usd=15.0
+        )
+        result = await costs.costs_by_day(db)
+        by_day = {row["day"]: row["total_cost_usd"] for row in result}
+        days = sorted(by_day.keys())
+        assert by_day[days[0]] == pytest.approx(10.0)
+        assert by_day[days[1]] == pytest.approx(5.0)
 
     async def test_returns_descending_by_day(self, db) -> None:
         await _seed_statusline(
@@ -238,7 +255,8 @@ class TestCostsByDay:
         assert len(result) == 1
         assert result[0]["total_tokens"] == 420
 
-    async def test_pid_reuse_resets_token_counter(self, db) -> None:
+    async def test_token_counter_per_session(self, db) -> None:
+        """Different sessions have independent token counters."""
         await _seed_statusline(
             db,
             session_id="s1",
@@ -248,11 +266,10 @@ class TestCostsByDay:
             input_tokens=100,
             output_tokens=40,
         )
-        await _seed_death(db, pid=10, observed_at=DAY1_START + 100)
         await _seed_statusline(
             db,
-            session_id="s1",
-            pid=10,
+            session_id="s2",
+            pid=20,
             received_at=DAY2_START + 60,
             cost_usd=0.5,
             input_tokens=60,
