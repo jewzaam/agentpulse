@@ -3,8 +3,8 @@
 
 Two data sources feed the dashboard summary:
 
-1. ``claude_log_statuslines`` — cost and token counters (monotonic per
-   instance window, delta-based aggregation).
+1. ``claude_log_statuslines`` — cost and token counters (session-
+   cumulative, delta-based aggregation partitioned by session_id).
 2. ``claude_log_hooks`` — session count (distinct session_ids) and
    message count (Stop events on the main agent × 2, reflecting one
    user prompt + one assistant response per exchange).
@@ -12,64 +12,53 @@ Two data sources feed the dashboard summary:
 The two result sets are merged by day (or day+cwd) in Python. Days that
 appear in one source but not the other get zeros for the missing fields.
 
-cost_usd and the token counters (total_input_tokens, total_output_tokens)
-are monotonic per instance window — a contiguous span of activity on a
-(pid, source_system, cwd) tuple bounded by claude_log_pid_deaths rows.
-Across windows the counters reset, so we group by
-``(pid, source_system, cwd, prior_death)`` and compute deltas separately
-within each group.
+cost_usd is session-cumulative — it carries forward across ``--resume``
+(new PID inherits the running total). Deltas are computed per session
+per day: ``day_max - prev_day_max``, with baseline 0 for the first
+observed day. When a day's max is lower than the prior day's max (cost
+counter reset from a new process that didn't inherit), the delta uses
+``day_max - day_min`` within that day.
 """
 
 import aiosqlite
 
 _COST_CTE = """
-WITH instance_rows AS (
+WITH session_day AS (
     SELECT
-        s.cwd AS cwd,
-        s.cost_usd AS cost_usd,
-        s.total_input_tokens AS total_input_tokens,
-        s.total_output_tokens AS total_output_tokens,
-        s.received_at AS received_at,
-        s.pid AS pid,
-        s.source_system AS source_system,
-        COALESCE(
-            (SELECT MAX(observed_at) FROM claude_log_pid_deaths d
-             WHERE d.pid = s.pid
-                   AND d.source_system = s.source_system
-                   AND d.cwd = s.cwd
-                   AND d.observed_at < s.received_at),
-            -1.0
-        ) AS prior_death
-    FROM claude_log_statuslines s
-    WHERE s.cost_usd IS NOT NULL
-),
-day_max AS (
-    SELECT
-        date(received_at, 'unixepoch', 'localtime') AS day,
+        session_id,
         cwd,
-        pid,
-        source_system,
-        prior_death,
-        MAX(cost_usd) AS day_max_cost,
+        date(received_at, 'unixepoch', 'localtime') AS day,
+        MIN(cost_usd) AS day_min,
+        MAX(cost_usd) AS day_max,
+        COALESCE(MIN(total_input_tokens), 0) AS day_min_input,
         COALESCE(MAX(total_input_tokens), 0) AS day_max_input,
+        COALESCE(MIN(total_output_tokens), 0) AS day_min_output,
         COALESCE(MAX(total_output_tokens), 0) AS day_max_output
-    FROM instance_rows
-    GROUP BY pid, source_system, cwd, prior_death, day
+    FROM claude_log_statuslines
+    WHERE cost_usd IS NOT NULL
+    GROUP BY session_id, day
 ),
 deltas AS (
     SELECT
         day,
         cwd,
-        day_max_cost - LAG(day_max_cost, 1, 0.0)
-            OVER w AS cost_delta,
-        day_max_input - LAG(day_max_input, 1, 0)
-            OVER w AS input_delta,
-        day_max_output - LAG(day_max_output, 1, 0)
-            OVER w AS output_delta
-    FROM day_max
-    WINDOW w AS (
-        PARTITION BY pid, source_system, cwd, prior_death ORDER BY day
-    )
+        CASE
+            WHEN day_max < COALESCE(LAG(day_max) OVER w, 0.0)
+            THEN day_max - day_min
+            ELSE day_max - COALESCE(LAG(day_max) OVER w, 0.0)
+        END AS cost_delta,
+        CASE
+            WHEN day_max_input < COALESCE(LAG(day_max_input) OVER w, 0)
+            THEN day_max_input - day_min_input
+            ELSE day_max_input - COALESCE(LAG(day_max_input) OVER w, 0)
+        END AS input_delta,
+        CASE
+            WHEN day_max_output < COALESCE(LAG(day_max_output) OVER w, 0)
+            THEN day_max_output - day_min_output
+            ELSE day_max_output - COALESCE(LAG(day_max_output) OVER w, 0)
+        END AS output_delta
+    FROM session_day
+    WINDOW w AS (PARTITION BY session_id ORDER BY day)
 )
 """
 
