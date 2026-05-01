@@ -25,6 +25,7 @@ endif
 -include make/tray.mk
 # Standard test targets pulled out for readability.
 -include make/test.mk
+-include make/version-check.mk
 
 $(info venv: $(VENV_DIR))
 
