@@ -1,5 +1,13 @@
 # Client Guide
 
+> **Python users: use the `agentpulse[client]` library.**
+> See [`python-client.md`](python-client.md) — it ships a sync facade
+> (Tk/Qt-friendly) and an async core that already handle bootstrap,
+> reconnect, frame dispatch, and the cumulative-vs-replace semantics
+> documented below. The rest of this doc is the wire protocol — for
+> non-Python consumers, library maintainers, or anyone debugging the
+> protocol layer.
+
 How to write a client against AgentPulse. Focused, hands-on. For
 the full surface, see [`api.md`](api.md), [`websocket.md`](websocket.md),
 and [`../reference/state-transitions.md`](../reference/state-transitions.md).

@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+client = [
+    "httpx>=0.24.0",
+    "websockets>=12.0",
+]
 tray = [
     "pystray>=0.19",
     "Pillow>=10.0",
@@ -40,13 +44,14 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-mock>=3.0",
     "pytest-asyncio>=0.21.0",
+    "respx>=0.20",
     "black>=23.0",
     "flake8>=6.0",
     "mypy==1.11.2",
     "xenon>=0.9.0",
     "mutmut>=2.0,<3.0",
     "types-psutil>=5.9.0",
-    "agentpulse[tray]",
+    "agentpulse[client,tray]",
 ]
 
 [project.scripts]
