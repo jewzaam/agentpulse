@@ -74,21 +74,28 @@ src/agentpulse/
 │   ├── limits.py                 # OAuth API usage limit fetching + v2 broadcast
 │   ├── schema.py                 # claude_log_* DDL + inserters
 │   └── models.py                 # ClaudeHookPayload Pydantic model
-└── api/
-    └── v2/
-        ├── router.py             # /api/v2/processes, /sessions, /log/{hooks,statuslines,pid-deaths,api-limits}
-        ├── models.py             # ProcessResponse, SessionResponse, EpochResponse, ...
-        ├── ids.py                # process_id, epoch_id (sha256 prefix-16)
-        ├── state.py              # derive_state (Stop → ready) + compute_effective_state
-        ├── throttle.py           # HookBroadcastThrottle — debounces same-state hook_logged broadcasts
-        ├── websocket.py          # /ws/v2 endpoint
-        ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged, api_limits_logged
-        └── queries/              # projection layer over claude_log_* tables
-            ├── log.py            # raw filtered reads
-            ├── enrich.py         # IdEnricher (per-request id cache)
-            ├── sessions.py       # session/epoch derivation
-            ├── processes.py      # process derivation (consults pid_deaths for ended_at/pid_alive)
-            └── _helpers.py       # shared latest-hook + agent helpers
+├── api/
+│   └── v2/
+│       ├── router.py             # /api/v2/processes, /sessions, /log/{hooks,statuslines,pid-deaths,api-limits}
+│       ├── models.py             # ProcessResponse, SessionResponse, EpochResponse, ...
+│       ├── ids.py                # process_id, epoch_id (sha256 prefix-16)
+│       ├── state.py              # derive_state (Stop → ready) + compute_effective_state
+│       ├── throttle.py           # HookBroadcastThrottle — debounces same-state hook_logged broadcasts
+│       ├── websocket.py          # /ws/v2 endpoint
+│       ├── events.py             # broadcast_hook_logged, statusline_logged, pid_death_logged, api_limits_logged
+│       └── queries/              # projection layer over claude_log_* tables
+│           ├── log.py            # raw filtered reads
+│           ├── enrich.py         # IdEnricher (per-request id cache)
+│           ├── sessions.py       # session/epoch derivation
+│           ├── processes.py      # process derivation (consults pid_deaths for ended_at/pid_alive)
+│           └── _helpers.py       # shared latest-hook + agent helpers
+└── client/                       # consumer library — `agentpulse[client]` extra
+    ├── config.py                 # ClientConfig + load_client_config (~/.claude/agentpulse/config.json)
+    ├── types.py                  # frozen dataclasses: Session, Epoch, Agent, Limits, ConnectionState
+    ├── _state.py                 # ClientStore — frame application, RLock-guarded, callback dispatch
+    ├── rest.py                   # async REST helpers (post_*, fetch_*); never raise on network failure
+    ├── aio.py                    # AsyncAgentPulseClient — async core
+    └── sync.py                   # AgentPulseClient — daemon-thread facade with marshaler
 ```
 
 ## Key Design Decisions
@@ -126,6 +133,15 @@ src/agentpulse/
   a configurable window (`broadcast_debounce_ms`, default 500). Storage is
   unaffected — every hook still lands in `claude_log_hooks`. `derived_state`
   is computed server-side and included on every `hook_logged` frame.
+- **Python consumers use `agentpulse.client`, not raw REST/WS** —
+  `src/agentpulse/client/` ships a sync facade (`AgentPulseClient` with
+  optional Tk/Qt marshaler) and an async core (`AsyncAgentPulseClient`)
+  that already handle bootstrap, reconnect with exponential backoff,
+  frame dispatch, cumulative-vs-replace cost semantics, and pid_death
+  fan-out. New Python consumers should depend on `agentpulse[client]`
+  rather than re-implementing the streaming loop. The wire-protocol
+  guide at `docs/design/clients.md` is for non-Python consumers and
+  library maintainers. See `docs/design/python-client.md` for usage.
 
 ## WebSocket API
 

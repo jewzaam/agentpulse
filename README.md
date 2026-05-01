@@ -31,6 +31,23 @@ With the optional tray icon:
 pipx install "agentpulse[tray] @ git+https://github.com/jewzaam/agentpulse.git"
 ```
 
+For Python apps that consume AgentPulse over its REST + WebSocket API,
+add the `[client]` extra (brings in `httpx` and `websockets`):
+
+```bash
+pip install "agentpulse[client] @ git+https://github.com/jewzaam/agentpulse.git"
+```
+
+```python
+from agentpulse.client import AgentPulseClient, load_client_config
+
+client = AgentPulseClient(load_client_config())
+client.on_change(lambda: print(client.sessions()))
+client.start()
+```
+
+See [Python client guide](docs/design/python-client.md).
+
 For local development:
 
 ```bash
@@ -139,7 +156,8 @@ All configuration is via the config file (`--config` is required). See `config.e
 
 ## Documentation
 
-- [Client guide (v2)](docs/design/clients.md) — connecting, bootstrap, message handling
+- [Python client library](docs/design/python-client.md) — `agentpulse[client]` for Python consumers (sync + async)
+- [Client guide (wire protocol)](docs/design/clients.md) — for non-Python consumers and library maintainers
 - [REST API design](docs/design/api.md) — `/api/v2/` resources and response shapes
 - [WebSocket protocol](docs/design/websocket.md) — frame types and dispatch
 - [Database design](docs/design/database.md) — append-only log model
